@@ -156,6 +156,21 @@
   .reviewActions{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
   .reviewActions .left{display:flex; gap:8px;}
   .reviewActions .right{display:flex; gap:8px;}
+
+  #groupDetailCard{width:min(640px,92vw);}
+  #conjuntsList{margin-bottom:12px;}
+  .conjuntRow{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; margin-bottom:8px; cursor:pointer;
+  }
+  .conjuntRow:hover{border-color:var(--accent);}
+  .conjuntRow .cInfo{display:flex; flex-direction:column; gap:2px;}
+  .conjuntRow .cName{font-size:13px; font-weight:600;}
+  .conjuntRow .cMeta{font-size:11px; color:var(--muted);}
+  .conjuntRow .cDel{color:var(--danger); flex-shrink:0;}
+  #groupDetailEmpty{color:var(--muted); font-size:13px; padding:4px 0 12px;}
+  #addConjuntBtn{margin-bottom:4px;}
 </style>
 </head>
 <body>
@@ -168,7 +183,7 @@
   <button id="addRangeBtn">Afegeix pàgines</button>
   <button id="selectAllBtn">Selecciona-ho tot</button>
   <button id="clearSelBtn">Neteja selecció</button>
-  <button id="createGroupBtn" disabled>Crea un grup</button>
+  <button id="createGroupBtn">Crea un grup</button>
   <button id="newFileBtn">Obre un altre PDF</button>
 </header>
 
@@ -209,11 +224,29 @@
 
 <div class="overlay" id="nameModalOverlay">
   <div id="nameModalCard">
-    <label for="groupNameInput">Nom del grup</label>
+    <label for="groupNameInput" id="nameModalLabel">Nom del grup</label>
     <input type="text" id="groupNameInput" placeholder="ex: Zócalo (ZO) — bastidor">
     <div class="actions">
       <button id="nameModalCancel">Cancel·la</button>
       <button class="primary" id="nameModalCreate">Crea</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="groupDetailOverlay">
+  <div class="reviewCard" id="groupDetailCard">
+    <div class="reviewTop">
+      <input type="text" id="groupDetailNameInput">
+      <button id="groupDetailCloseBtn">Tanca ✕</button>
+    </div>
+    <div id="conjuntsList"></div>
+    <div id="groupDetailEmpty" style="display:none;">Aquest grup encara no té cap conjunt.</div>
+    <button id="addConjuntBtn">+ Afegeix un conjunt amb la selecció actual</button>
+    <div class="reviewActions" style="margin-top:16px;">
+      <div class="left">
+        <button id="deleteGroupDetailBtn">Elimina el grup</button>
+      </div>
+      <div class="right"></div>
     </div>
   </div>
 </div>
@@ -240,11 +273,11 @@
     <button id="addRowBtn">+ Afegeix fila</button>
     <div class="reviewActions" style="margin-top:16px;">
       <div class="left">
-        <button id="deleteGroupBtn">Elimina el grup</button>
+        <button id="deleteConjuntBtn">Elimina el conjunt</button>
       </div>
       <div class="right">
         <button id="reviewCancelBtn">Cancel·la</button>
-        <button class="primary" id="reviewSaveBtn">Desa el grup</button>
+        <button class="primary" id="reviewSaveBtn">Desa el conjunt</button>
       </div>
     </div>
   </div>
@@ -309,16 +342,24 @@ var els = {
   groupsList: document.getElementById('groupsList'),
   exportCatalogBtn: document.getElementById('exportCatalogBtn'),
   nameModalOverlay: document.getElementById('nameModalOverlay'),
+  nameModalLabel: document.getElementById('nameModalLabel'),
   groupNameInput: document.getElementById('groupNameInput'),
   nameModalCancel: document.getElementById('nameModalCancel'),
   nameModalCreate: document.getElementById('nameModalCreate'),
+  groupDetailOverlay: document.getElementById('groupDetailOverlay'),
+  groupDetailNameInput: document.getElementById('groupDetailNameInput'),
+  groupDetailCloseBtn: document.getElementById('groupDetailCloseBtn'),
+  conjuntsList: document.getElementById('conjuntsList'),
+  groupDetailEmpty: document.getElementById('groupDetailEmpty'),
+  addConjuntBtn: document.getElementById('addConjuntBtn'),
+  deleteGroupDetailBtn: document.getElementById('deleteGroupDetailBtn'),
   groupModalOverlay: document.getElementById('groupModalOverlay'),
   reviewNameInput: document.getElementById('reviewNameInput'),
   reviewPagesLabel: document.getElementById('reviewPagesLabel'),
   reviewThumbs: document.getElementById('reviewThumbs'),
   reviewTableBody: document.getElementById('reviewTableBody'),
   addRowBtn: document.getElementById('addRowBtn'),
-  deleteGroupBtn: document.getElementById('deleteGroupBtn'),
+  deleteConjuntBtn: document.getElementById('deleteConjuntBtn'),
   reviewCancelBtn: document.getElementById('reviewCancelBtn'),
   reviewSaveBtn: document.getElementById('reviewSaveBtn')
 };
@@ -334,7 +375,8 @@ var state = {
   renderQueue: [],
   activeRenders: 0,
   groups: [],
-  editingGroup: null
+  currentGroupId: null,
+  editingConjunt: null
 };
 
 function showToast(msg, ms){
@@ -368,7 +410,7 @@ els.newFileBtn.addEventListener('click', function(){
 function resetApp(){
   state.pdfDoc = null; state.pdfBytes = null; state.numPages = 0;
   state.selected = new Set(); state.cells = [];
-  state.groups = []; state.editingGroup = null;
+  state.groups = []; state.editingConjunt = null; state.currentGroupId = null;
   els.grid.innerHTML = '';
   els.header.style.display = 'none';
   els.footer.style.display = 'none';
@@ -534,7 +576,6 @@ function updateSelCount(){
   var n = state.selected.size;
   els.selCount.textContent = n + (n===1 ? ' pàgina seleccionada' : ' pàgines seleccionades');
   els.exportBtn.disabled = n === 0;
-  els.createGroupBtn.disabled = n === 0;
 }
 
 // ---- Toolbar actions ----
@@ -642,7 +683,10 @@ function closeModal(){
 }
 
 // ---- Groups (spare-parts catalog) ----
-var GROUPS_LS_KEY = 'rs_groups_v1';
+// Data model: a Group is a named container ("Fusor Micron", "Zócalo") holding
+// several Conjunts ("A. Conjunto Depósito", "B. Conjunto Distribuidor"...),
+// each tied to its own drawing page(s) and its own editable rows table.
+var GROUPS_LS_KEY = 'rs_groups_v2';
 
 function loadAllGroups(){
   try{ return JSON.parse(localStorage.getItem(GROUPS_LS_KEY) || '{}'); }
@@ -660,9 +704,10 @@ function uid(){
   return Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 }
 
-// -- Text extraction heuristic (deliberately simple; the review table is what
-//    guarantees quality, since column layouts vary between manual sections) --
-function extractRowsFromPage(page){
+// -- Page text helper: reconstructs reading-order lines from pdf.js text
+//    items, grouping by Y coordinate. Shared by row extraction and name
+//    suggestion so both see the same line reconstruction. --
+function getPageLines(page){
   return state.pdfDoc.getPage(page).then(function(pdfPage){
     return pdfPage.getTextContent();
   }).then(function(tc){
@@ -679,14 +724,45 @@ function extractRowsFromPage(page){
       line.items.push({x:x, str:str});
     });
     lines.sort(function(a,b){ return b.y - a.y; }); // top-to-bottom (PDF space: y grows upward)
-    var rows = [];
-    lines.forEach(function(l){
+    return lines.map(function(l){
       l.items.sort(function(a,b){ return a.x - b.x; });
-      var text = l.items.map(function(it){ return it.str; }).join(' ').replace(/\s+/g,' ').trim();
-      if(text) rows.push(parseLineToRow(text, page));
-    });
-    return rows;
+      return l.items.map(function(it){ return it.str; }).join(' ').replace(/\s+/g,' ').trim();
+    }).filter(Boolean);
   });
+}
+
+// -- Text extraction heuristic (deliberately simple; the review table is what
+//    guarantees quality, since column layouts vary between manual sections) --
+function extractRowsFromPage(page){
+  return getPageLines(page).then(function(lines){
+    return lines.map(function(text){ return parseLineToRow(text, page); });
+  });
+}
+
+// -- Suggest a name from the drawing's own title text: sections copied from
+//    the Meler/Micron sub-manuals have a heading like "A. CONJUNTO DEPÓSITO";
+//    the main machine's drawing sheets have a "GRUPO <name>" / "SUBGRUPO
+//    <name>" label in the title block instead. Only looks at the first page
+//    of the selection — always editable before confirming. --
+function suggestNameFromPages(pages){
+  if(!pages.length) return Promise.resolve('');
+  return getPageLines(pages[0]).then(function(lines){
+    for(var i=0;i<lines.length;i++){
+      if(/^[A-Z]\.?\s*CONJUNTO\s+.+/i.test(lines[i])) return titleCaseEs(lines[i]);
+    }
+    for(var i=0;i<lines.length;i++){
+      var m = lines[i].match(/\bGRUPO\s+(.+)$/i);
+      if(m) return m[1].trim();
+    }
+    for(var i=0;i<lines.length;i++){
+      var m = lines[i].match(/\bSUBGRUPO\s+(.+)$/i);
+      if(m) return m[1].trim();
+    }
+    return '';
+  }).catch(function(){ return ''; });
+}
+function titleCaseEs(s){
+  return s.trim().toLowerCase().replace(/(^|\s)([a-záéíóúñ])/g, function(m,sp,c){ return sp + c.toUpperCase(); });
 }
 
 function parseLineToRow(text, page){
@@ -712,45 +788,67 @@ function parseLineToRow(text, page){
   return {pos:pos, ref:ref, cant:cant, denominacio:denomParts.join(' '), page:page};
 }
 
-// -- Create group flow --
+// -- Name modal: shared by "create a Group" and "add a Conjunt to a Group" --
+var pendingNameAction = null; // 'group' | 'conjunt'
+var pendingGroupId = null;
+var pendingPages = null;
+
 els.createGroupBtn.addEventListener('click', function(){
-  if(state.selected.size === 0) return;
+  pendingNameAction = 'group';
+  pendingGroupId = null;
+  pendingPages = null;
+  els.nameModalLabel.textContent = 'Nom del grup';
   els.groupNameInput.value = '';
   els.nameModalOverlay.classList.add('open');
   els.groupNameInput.focus();
+  var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
+  if(pages.length){
+    suggestNameFromPages(pages).then(function(name){
+      if(name && pendingNameAction === 'group'){
+        els.groupNameInput.value = name;
+        els.groupNameInput.select();
+      }
+    });
+  }
 });
-els.nameModalCancel.addEventListener('click', function(){
-  els.nameModalOverlay.classList.remove('open');
-});
+els.nameModalCancel.addEventListener('click', cancelNameModal);
 els.nameModalOverlay.addEventListener('click', function(e){
-  if(e.target === els.nameModalOverlay) els.nameModalOverlay.classList.remove('open');
+  if(e.target === els.nameModalOverlay) cancelNameModal();
 });
+function closeNameModal(){
+  els.nameModalOverlay.classList.remove('open');
+  pendingNameAction = null; pendingGroupId = null; pendingPages = null;
+}
+function cancelNameModal(){
+  var action = pendingNameAction, groupId = pendingGroupId;
+  closeNameModal();
+  if(action === 'conjunt' && groupId) openGroupDetail(groupId);
+}
 els.groupNameInput.addEventListener('keydown', function(e){
   if(e.key === 'Enter') els.nameModalCreate.click();
 });
 els.nameModalCreate.addEventListener('click', function(){
   var name = els.groupNameInput.value.trim();
-  if(!name){ showToast('Posa un nom al grup.'); return; }
+  if(!name){ showToast('Posa un nom.'); return; }
+  var action = pendingNameAction, groupId = pendingGroupId, pages = pendingPages;
   els.nameModalOverlay.classList.remove('open');
-  createGroupFromSelection(name);
+  pendingNameAction = null; pendingGroupId = null; pendingPages = null;
+  if(action === 'group') createGroup(name);
+  else if(action === 'conjunt') addConjuntToGroup(groupId, name, pages);
 });
 
-function createGroupFromSelection(name){
-  var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
-  setStatus('Extraient text de ' + pages.length + ' pàgines…');
-  Promise.all(pages.map(extractRowsFromPage)).then(function(rowsPerPage){
-    var rows = [].concat.apply([], rowsPerPage);
-    var group = {id: uid(), name: name, pages: pages, rows: rows};
-    state.groups.push(group);
-    persistGroups();
-    renderGroupsPanel();
-    setStatus('');
-    openGroupReview(group.id, true);
-  }).catch(function(err){
-    console.error(err);
-    setStatus('');
-    showToast('Error extraient el text: ' + err.message, 4000);
-  });
+function createGroup(name){
+  var group = {id: uid(), name: name, conjunts: []};
+  state.groups.push(group);
+  persistGroups();
+  renderGroupsPanel();
+  openGroupDetail(group.id);
+}
+
+function deleteGroup(id){
+  state.groups = state.groups.filter(function(g){ return g.id !== id; });
+  persistGroups();
+  renderGroupsPanel();
 }
 
 // -- Groups panel --
@@ -763,10 +861,11 @@ function renderGroupsPanel(){
     var nameEl = document.createElement('div');
     nameEl.className = 'gName';
     nameEl.textContent = g.name;
+    var rowCount = g.conjunts.reduce(function(sum,c){ return sum + c.rows.length; }, 0);
     var metaEl = document.createElement('div');
     metaEl.className = 'gMeta';
-    metaEl.textContent = g.pages.length + (g.pages.length===1?' pàgina · ':' pàgines · ') +
-      g.rows.length + (g.rows.length===1?' fila':' files');
+    metaEl.textContent = g.conjunts.length + (g.conjunts.length===1?' conjunt · ':' conjunts · ') +
+      rowCount + (rowCount===1?' fila':' files');
     var delBtn = document.createElement('button');
     delBtn.className = 'gDel';
     delBtn.textContent = '✕';
@@ -777,43 +876,154 @@ function renderGroupsPanel(){
     chip.appendChild(nameEl);
     chip.appendChild(metaEl);
     chip.appendChild(delBtn);
-    chip.addEventListener('click', function(){ openGroupReview(g.id, false); });
+    chip.addEventListener('click', function(){ openGroupDetail(g.id); });
     els.groupsList.appendChild(chip);
   });
 }
 
-function deleteGroup(id){
-  state.groups = state.groups.filter(function(g){ return g.id !== id; });
+// -- Group detail modal: lists the group's conjunts, lets you add a new one
+//    from the pages currently checked in the main grid --
+function openGroupDetail(groupId){
+  var g = state.groups.find(function(x){ return x.id === groupId; });
+  if(!g) return;
+  state.currentGroupId = groupId;
+  els.groupDetailNameInput.value = g.name;
+  renderConjuntsList(g);
+  els.groupDetailOverlay.classList.add('open');
+}
+function closeGroupDetail(){
+  els.groupDetailOverlay.classList.remove('open');
+  state.currentGroupId = null;
+}
+function renderConjuntsList(g){
+  els.conjuntsList.innerHTML = '';
+  els.groupDetailEmpty.style.display = g.conjunts.length ? 'none' : 'block';
+  var n = state.selected.size;
+  els.addConjuntBtn.textContent = n
+    ? '+ Afegeix un conjunt amb la selecció actual (' + n + (n===1?' pàgina)':' pàgines)')
+    : '+ Afegeix un conjunt (selecciona pàgines a la graella primer)';
+  els.addConjuntBtn.disabled = n === 0;
+  g.conjunts.forEach(function(c){
+    var row = document.createElement('div');
+    row.className = 'conjuntRow';
+    var info = document.createElement('div');
+    info.className = 'cInfo';
+    var nameEl = document.createElement('span');
+    nameEl.className = 'cName';
+    nameEl.textContent = c.name;
+    var metaEl = document.createElement('span');
+    metaEl.className = 'cMeta';
+    metaEl.textContent = 'Pàg. ' + c.pages.join(', ') + ' · ' + c.rows.length + (c.rows.length===1?' fila':' files');
+    info.appendChild(nameEl); info.appendChild(metaEl);
+    var delBtn = document.createElement('button');
+    delBtn.className = 'cDel';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('click', function(e){
+      e.stopPropagation();
+      deleteConjunt(g.id, c.id);
+    });
+    row.appendChild(info);
+    row.appendChild(delBtn);
+    row.addEventListener('click', function(){ openConjuntReview(g.id, c.id, false); });
+    els.conjuntsList.appendChild(row);
+  });
+}
+els.groupDetailCloseBtn.addEventListener('click', closeGroupDetail);
+els.groupDetailOverlay.addEventListener('click', function(e){
+  if(e.target === els.groupDetailOverlay) closeGroupDetail();
+});
+els.groupDetailNameInput.addEventListener('input', function(){
+  var g = state.groups.find(function(x){ return x.id === state.currentGroupId; });
+  if(g) g.name = els.groupDetailNameInput.value;
+});
+els.groupDetailNameInput.addEventListener('blur', function(){
+  var name = els.groupDetailNameInput.value.trim();
+  if(!name){ showToast('Posa un nom al grup.'); return; }
   persistGroups();
   renderGroupsPanel();
+});
+els.deleteGroupDetailBtn.addEventListener('click', function(){
+  var groupId = state.currentGroupId;
+  closeGroupDetail();
+  deleteGroup(groupId);
+});
+els.addConjuntBtn.addEventListener('click', function(){
+  if(state.selected.size === 0) return;
+  pendingNameAction = 'conjunt';
+  pendingGroupId = state.currentGroupId;
+  pendingPages = Array.from(state.selected).sort(function(a,b){ return a-b; });
+  els.groupDetailOverlay.classList.remove('open'); // avoid stacking two overlays
+  els.nameModalLabel.textContent = 'Nom del conjunt';
+  els.groupNameInput.value = '';
+  els.nameModalOverlay.classList.add('open');
+  els.groupNameInput.focus();
+  suggestNameFromPages(pendingPages).then(function(name){
+    if(name && pendingNameAction === 'conjunt'){
+      els.groupNameInput.value = name;
+      els.groupNameInput.select();
+    }
+  });
+});
+
+function addConjuntToGroup(groupId, name, pages){
+  var g = state.groups.find(function(x){ return x.id === groupId; });
+  if(!g) return;
+  setStatus('Extraient text de ' + pages.length + ' pàgines…');
+  Promise.all(pages.map(extractRowsFromPage)).then(function(rowsPerPage){
+    var rows = [].concat.apply([], rowsPerPage);
+    var conjunt = {id: uid(), name: name, pages: pages, rows: rows};
+    g.conjunts.push(conjunt);
+    persistGroups();
+    renderGroupsPanel();
+    setStatus('');
+    openConjuntReview(groupId, conjunt.id, true);
+  }).catch(function(err){
+    console.error(err);
+    setStatus('');
+    showToast('Error extraient el text: ' + err.message, 4000);
+  });
 }
 
-// -- Group review modal --
-function openGroupReview(id, isNew){
-  var g = state.groups.find(function(x){ return x.id === id; });
+function deleteConjunt(groupId, conjuntId){
+  var g = state.groups.find(function(x){ return x.id === groupId; });
   if(!g) return;
-  state.editingGroup = {
-    id: g.id,
+  g.conjunts = g.conjunts.filter(function(c){ return c.id !== conjuntId; });
+  persistGroups();
+  renderGroupsPanel();
+  if(els.groupDetailOverlay.classList.contains('open') && state.currentGroupId === groupId){
+    renderConjuntsList(g);
+  }
+}
+
+// -- Conjunt review modal (pages + editable rows table) --
+function openConjuntReview(groupId, conjuntId, isNew){
+  var g = state.groups.find(function(x){ return x.id === groupId; });
+  var c = g && g.conjunts.find(function(x){ return x.id === conjuntId; });
+  if(!c) return;
+  state.editingConjunt = {
+    groupId: groupId,
+    id: c.id,
     isNew: !!isNew,
-    rows: g.rows.map(function(r){
+    rows: c.rows.map(function(r){
       return {pos:r.pos, ref:r.ref, cant:r.cant, denominacio:r.denominacio, page:r.page};
     }),
-    pages: g.pages.slice()
+    pages: c.pages.slice()
   };
-  els.reviewNameInput.value = g.name;
-  els.reviewPagesLabel.textContent = 'Pàgines: ' + g.pages.join(', ');
+  els.reviewNameInput.value = c.name;
+  els.reviewPagesLabel.textContent = 'Pàgines: ' + c.pages.join(', ');
   els.reviewThumbs.innerHTML = '';
-  g.pages.forEach(function(p){
-    var c = document.createElement('canvas');
-    els.reviewThumbs.appendChild(c);
-    renderPageToCanvas(p, c, 260).catch(function(err){ console.warn('preview render', p, err); });
+  c.pages.forEach(function(p){
+    var cv = document.createElement('canvas');
+    els.reviewThumbs.appendChild(cv);
+    renderPageToCanvas(p, cv, 260).catch(function(err){ console.warn('preview render', p, err); });
   });
   renderReviewTable();
+  els.groupDetailOverlay.classList.remove('open');
   els.groupModalOverlay.classList.add('open');
 }
 
 function renderReviewTable(){
-  var rows = state.editingGroup.rows;
+  var rows = state.editingConjunt.rows;
   els.reviewTableBody.innerHTML = '';
   rows.forEach(function(row, idx){
     var tr = document.createElement('tr');
@@ -841,7 +1051,7 @@ function renderReviewTable(){
     var tdRm = document.createElement('td'); tdRm.className = 'rmCol';
     var rmBtn = document.createElement('button'); rmBtn.className = 'rmRowBtn'; rmBtn.textContent = '✕';
     rmBtn.addEventListener('click', function(){
-      state.editingGroup.rows.splice(idx, 1);
+      state.editingConjunt.rows.splice(idx, 1);
       renderReviewTable();
     });
     tdRm.appendChild(rmBtn); tr.appendChild(tdRm);
@@ -851,50 +1061,58 @@ function renderReviewTable(){
 }
 
 els.addRowBtn.addEventListener('click', function(){
-  state.editingGroup.rows.push({pos:'', ref:'', cant:'', denominacio:'', page: state.editingGroup.pages[0]});
+  state.editingConjunt.rows.push({pos:'', ref:'', cant:'', denominacio:'', page: state.editingConjunt.pages[0]});
   renderReviewTable();
 });
 
 els.reviewCancelBtn.addEventListener('click', function(){
-  var wasNew = state.editingGroup && state.editingGroup.isNew;
-  var id = state.editingGroup && state.editingGroup.id;
-  closeGroupReview();
-  if(wasNew) deleteGroup(id);
+  var ec = state.editingConjunt;
+  if(!ec) return;
+  var wasNew = ec.isNew, groupId = ec.groupId, id = ec.id;
+  closeConjuntReview();
+  if(wasNew) deleteConjunt(groupId, id);
+  openGroupDetail(groupId);
 });
 els.groupModalOverlay.addEventListener('click', function(e){
   if(e.target === els.groupModalOverlay) els.reviewCancelBtn.click();
 });
 document.addEventListener('keydown', function(e){
   if(e.key !== 'Escape') return;
-  if(els.nameModalOverlay.classList.contains('open')) els.nameModalOverlay.classList.remove('open');
-  if(els.groupModalOverlay.classList.contains('open')) els.reviewCancelBtn.click();
+  if(els.nameModalOverlay.classList.contains('open')){ cancelNameModal(); return; }
+  if(els.groupModalOverlay.classList.contains('open')){ els.reviewCancelBtn.click(); return; }
+  if(els.groupDetailOverlay.classList.contains('open')){ closeGroupDetail(); return; }
 });
 
 els.reviewSaveBtn.addEventListener('click', function(){
-  var eg = state.editingGroup;
-  if(!eg) return;
+  var ec = state.editingConjunt;
+  if(!ec) return;
   var name = els.reviewNameInput.value.trim();
-  if(!name){ showToast('Posa un nom al grup.'); return; }
-  var g = state.groups.find(function(x){ return x.id === eg.id; });
-  if(g){
-    g.name = name;
-    g.rows = eg.rows;
+  if(!name){ showToast('Posa un nom al conjunt.'); return; }
+  var g = state.groups.find(function(x){ return x.id === ec.groupId; });
+  var c = g && g.conjunts.find(function(x){ return x.id === ec.id; });
+  if(c){
+    c.name = name;
+    c.rows = ec.rows;
   }
   persistGroups();
   renderGroupsPanel();
-  closeGroupReview();
+  var groupId = ec.groupId;
+  closeConjuntReview();
+  openGroupDetail(groupId);
 });
 
-els.deleteGroupBtn.addEventListener('click', function(){
-  var eg = state.editingGroup;
-  if(!eg) return;
-  closeGroupReview();
-  deleteGroup(eg.id);
+els.deleteConjuntBtn.addEventListener('click', function(){
+  var ec = state.editingConjunt;
+  if(!ec) return;
+  var groupId = ec.groupId, id = ec.id;
+  closeConjuntReview();
+  deleteConjunt(groupId, id);
+  openGroupDetail(groupId);
 });
 
-function closeGroupReview(){
+function closeConjuntReview(){
   els.groupModalOverlay.classList.remove('open');
-  state.editingGroup = null;
+  state.editingConjunt = null;
 }
 
 // -- Export catalog JSON --
@@ -904,7 +1122,12 @@ els.exportCatalogBtn.addEventListener('click', function(){
     sourceFile: state.fileName + '.pdf',
     exportedAt: new Date().toISOString(),
     groups: state.groups.map(function(g){
-      return {name:g.name, pages:g.pages, rows:g.rows};
+      return {
+        name: g.name,
+        conjunts: g.conjunts.map(function(c){
+          return {name:c.name, pages:c.pages, rows:c.rows};
+        })
+      };
     })
   };
   var blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
