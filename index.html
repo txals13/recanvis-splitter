@@ -98,6 +98,64 @@
     background:var(--panel2); border:1px solid var(--border); padding:10px 16px;
     border-radius:8px; font-size:13px; z-index:200; display:none;
   }
+
+  /* ---- Groups ---- */
+  #groupsPanel{
+    display:none; border-bottom:1px solid var(--border); padding:12px 16px;
+    background:var(--panel);
+  }
+  #groupsPanelHeader{
+    display:flex; align-items:center; gap:12px; margin-bottom:10px;
+  }
+  #groupsPanelHeader strong{font-size:13px;}
+  #groupsList{display:flex; flex-wrap:wrap; gap:10px;}
+  .groupChip{
+    background:var(--panel2); border:1px solid var(--border); border-radius:8px;
+    padding:8px 10px; cursor:pointer; position:relative; min-width:150px;
+    max-width:220px;
+  }
+  .groupChip:hover{border-color:var(--accent);}
+  .groupChip .gName{font-size:13px; font-weight:600; margin-right:16px; word-break:break-word;}
+  .groupChip .gMeta{font-size:11px; color:var(--muted); margin-top:4px;}
+  .groupChip .gDel{
+    position:absolute; top:6px; right:6px; width:18px; height:18px; line-height:16px;
+    text-align:center; border-radius:4px; background:transparent; color:var(--muted);
+    font-size:12px; border:1px solid transparent;
+  }
+  .groupChip .gDel:hover{border-color:var(--danger); color:var(--danger);}
+
+  .overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:100;
+    display:none; align-items:center; justify-content:center; flex-direction:column;
+  }
+  .overlay.open{display:flex;}
+  .overlay button{padding:8px 14px;}
+
+  #nameModalCard, .reviewCard{
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:20px; max-width:92vw;
+  }
+  #nameModalCard label{display:block; font-size:13px; color:var(--muted); margin-bottom:8px;}
+  #nameModalCard input[type=text]{width:280px; margin-bottom:14px;}
+  #nameModalCard .actions{display:flex; justify-content:flex-end; gap:8px;}
+
+  .reviewCard{width:min(900px,92vw); max-height:88vh; overflow:auto;}
+  .reviewTop{display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;}
+  .reviewTop input[type=text]{width:260px;}
+  .reviewThumbs{display:flex; gap:8px; overflow-x:auto; margin-bottom:16px; padding-bottom:4px;}
+  .reviewThumbs canvas{height:140px; width:auto; border:1px solid var(--border); border-radius:6px; flex-shrink:0;}
+  table.rowsTable{width:100%; border-collapse:collapse; margin-bottom:12px;}
+  table.rowsTable th{text-align:left; font-size:11px; color:var(--muted); padding:4px 6px; border-bottom:1px solid var(--border);}
+  table.rowsTable td{padding:4px 6px; border-bottom:1px solid var(--border);}
+  table.rowsTable input[type=text]{width:100%; padding:6px 8px;}
+  table.rowsTable td.posCol input{width:60px;}
+  table.rowsTable td.cantCol input{width:60px;}
+  table.rowsTable td.refCol input{width:120px;}
+  table.rowsTable td.rmCol{width:30px;}
+  .rmRowBtn{width:26px; height:26px; padding:0; color:var(--danger); border-color:var(--border);}
+  .reviewActions{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+  .reviewActions .left{display:flex; gap:8px;}
+  .reviewActions .right{display:flex; gap:8px;}
 </style>
 </head>
 <body>
@@ -110,8 +168,17 @@
   <button id="addRangeBtn">Afegeix pàgines</button>
   <button id="selectAllBtn">Selecciona-ho tot</button>
   <button id="clearSelBtn">Neteja selecció</button>
+  <button id="createGroupBtn" disabled>Crea un grup</button>
   <button id="newFileBtn">Obre un altre PDF</button>
 </header>
+
+<div id="groupsPanel">
+  <div id="groupsPanelHeader">
+    <strong>Grups de dibuix</strong>
+    <button id="exportCatalogBtn">Exporta catàleg (JSON)</button>
+  </div>
+  <div id="groupsList"></div>
+</div>
 
 <div id="status"></div>
 
@@ -138,6 +205,49 @@
     <button id="modalClose">Tanca ✕</button>
   </div>
   <div id="modalImgWrap"><canvas id="modalCanvas"></canvas></div>
+</div>
+
+<div class="overlay" id="nameModalOverlay">
+  <div id="nameModalCard">
+    <label for="groupNameInput">Nom del grup</label>
+    <input type="text" id="groupNameInput" placeholder="ex: Zócalo (ZO) — bastidor">
+    <div class="actions">
+      <button id="nameModalCancel">Cancel·la</button>
+      <button class="primary" id="nameModalCreate">Crea</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="groupModalOverlay">
+  <div class="reviewCard">
+    <div class="reviewTop">
+      <input type="text" id="reviewNameInput">
+      <span id="reviewPagesLabel" style="color:var(--muted); font-size:12px;"></span>
+    </div>
+    <div class="reviewThumbs" id="reviewThumbs"></div>
+    <table class="rowsTable" id="reviewTable">
+      <thead>
+        <tr>
+          <th class="posCol">Pos.</th>
+          <th class="refCol">Ref.</th>
+          <th class="cantCol">Cant.</th>
+          <th>Denominació</th>
+          <th class="rmCol"></th>
+        </tr>
+      </thead>
+      <tbody id="reviewTableBody"></tbody>
+    </table>
+    <button id="addRowBtn">+ Afegeix fila</button>
+    <div class="reviewActions" style="margin-top:16px;">
+      <div class="left">
+        <button id="deleteGroupBtn">Elimina el grup</button>
+      </div>
+      <div class="right">
+        <button id="reviewCancelBtn">Cancel·la</button>
+        <button class="primary" id="reviewSaveBtn">Desa el grup</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -193,7 +303,24 @@ var els = {
   modalNext: document.getElementById('modalNext'),
   modalToggle: document.getElementById('modalToggle'),
   modalClose: document.getElementById('modalClose'),
-  toast: document.getElementById('toast')
+  toast: document.getElementById('toast'),
+  createGroupBtn: document.getElementById('createGroupBtn'),
+  groupsPanel: document.getElementById('groupsPanel'),
+  groupsList: document.getElementById('groupsList'),
+  exportCatalogBtn: document.getElementById('exportCatalogBtn'),
+  nameModalOverlay: document.getElementById('nameModalOverlay'),
+  groupNameInput: document.getElementById('groupNameInput'),
+  nameModalCancel: document.getElementById('nameModalCancel'),
+  nameModalCreate: document.getElementById('nameModalCreate'),
+  groupModalOverlay: document.getElementById('groupModalOverlay'),
+  reviewNameInput: document.getElementById('reviewNameInput'),
+  reviewPagesLabel: document.getElementById('reviewPagesLabel'),
+  reviewThumbs: document.getElementById('reviewThumbs'),
+  reviewTableBody: document.getElementById('reviewTableBody'),
+  addRowBtn: document.getElementById('addRowBtn'),
+  deleteGroupBtn: document.getElementById('deleteGroupBtn'),
+  reviewCancelBtn: document.getElementById('reviewCancelBtn'),
+  reviewSaveBtn: document.getElementById('reviewSaveBtn')
 };
 
 var state = {
@@ -205,7 +332,9 @@ var state = {
   cells: [],
   modalPage: 1,
   renderQueue: [],
-  activeRenders: 0
+  activeRenders: 0,
+  groups: [],
+  editingGroup: null
 };
 
 function showToast(msg, ms){
@@ -239,9 +368,12 @@ els.newFileBtn.addEventListener('click', function(){
 function resetApp(){
   state.pdfDoc = null; state.pdfBytes = null; state.numPages = 0;
   state.selected = new Set(); state.cells = [];
+  state.groups = []; state.editingGroup = null;
   els.grid.innerHTML = '';
   els.header.style.display = 'none';
   els.footer.style.display = 'none';
+  els.groupsPanel.style.display = 'none';
+  els.groupsList.innerHTML = '';
   els.dropzone.style.display = 'block';
   els.fileInput.value = '';
   setStatus('');
@@ -276,6 +408,8 @@ function loadPdf(bytesForPdfjs){
     els.fileInfo.textContent = state.fileName + '.pdf — ' + state.numPages + ' pàgines';
     setStatus('');
     updateSelCount();
+    state.groups = loadGroupsForFile(state.fileName);
+    renderGroupsPanel();
   }).catch(function(err){
     console.error(err);
     setStatus('');
@@ -361,21 +495,23 @@ function renderThumb(page){
   if(!cellInfo || cellInfo.rendered) return;
   cellInfo.rendered = true;
   state.activeRenders++;
-  state.pdfDoc.getPage(page).then(function(pdfPage){
-    var vp0 = pdfPage.getViewport({scale:1});
-    var targetWidth = 220;
-    var scale = targetWidth / vp0.width;
-    var viewport = pdfPage.getViewport({scale: scale});
-    var canvas = cellInfo.canvas;
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    var ctx = canvas.getContext('2d');
-    return pdfPage.render({canvasContext: ctx, viewport: viewport}).promise;
-  }).catch(function(err){
+  renderPageToCanvas(page, cellInfo.canvas, 220).catch(function(err){
     console.warn('Error rendering page', page, err);
   }).then(function(){
     state.activeRenders--;
     pumpRenderQueue();
+  });
+}
+
+function renderPageToCanvas(page, canvas, targetWidth){
+  return state.pdfDoc.getPage(page).then(function(pdfPage){
+    var vp0 = pdfPage.getViewport({scale:1});
+    var scale = targetWidth / vp0.width;
+    var viewport = pdfPage.getViewport({scale: scale});
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    var ctx = canvas.getContext('2d');
+    return pdfPage.render({canvasContext: ctx, viewport: viewport}).promise;
   });
 }
 
@@ -398,6 +534,7 @@ function updateSelCount(){
   var n = state.selected.size;
   els.selCount.textContent = n + (n===1 ? ' pàgina seleccionada' : ' pàgines seleccionades');
   els.exportBtn.disabled = n === 0;
+  els.createGroupBtn.disabled = n === 0;
 }
 
 // ---- Toolbar actions ----
@@ -503,6 +640,283 @@ document.addEventListener('keydown', function(e){
 function closeModal(){
   els.modalOverlay.classList.remove('open');
 }
+
+// ---- Groups (spare-parts catalog) ----
+var GROUPS_LS_KEY = 'rs_groups_v1';
+
+function loadAllGroups(){
+  try{ return JSON.parse(localStorage.getItem(GROUPS_LS_KEY) || '{}'); }
+  catch(e){ return {}; }
+}
+function loadGroupsForFile(fileName){
+  return loadAllGroups()[fileName] || [];
+}
+function persistGroups(){
+  var all = loadAllGroups();
+  all[state.fileName] = state.groups;
+  localStorage.setItem(GROUPS_LS_KEY, JSON.stringify(all));
+}
+function uid(){
+  return Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+}
+
+// -- Text extraction heuristic (deliberately simple; the review table is what
+//    guarantees quality, since column layouts vary between manual sections) --
+function extractRowsFromPage(page){
+  return state.pdfDoc.getPage(page).then(function(pdfPage){
+    return pdfPage.getTextContent();
+  }).then(function(tc){
+    var lines = [];
+    tc.items.forEach(function(it){
+      var str = it.str;
+      if(!str || !str.trim()) return;
+      var x = it.transform[4], y = it.transform[5];
+      var line = null;
+      for(var i=0;i<lines.length;i++){
+        if(Math.abs(lines[i].y - y) < 3){ line = lines[i]; break; }
+      }
+      if(!line){ line = {y:y, items:[]}; lines.push(line); }
+      line.items.push({x:x, str:str});
+    });
+    lines.sort(function(a,b){ return b.y - a.y; }); // top-to-bottom (PDF space: y grows upward)
+    var rows = [];
+    lines.forEach(function(l){
+      l.items.sort(function(a,b){ return a.x - b.x; });
+      var text = l.items.map(function(it){ return it.str; }).join(' ').replace(/\s+/g,' ').trim();
+      if(text) rows.push(parseLineToRow(text, page));
+    });
+    return rows;
+  });
+}
+
+function parseLineToRow(text, page){
+  var tokens = text.split(' ');
+  var pos = '', ref = '', cant = '', denomParts = [];
+  var posSet = false, cantSet = false;
+  tokens.forEach(function(tok){
+    if(!posSet && /^\d+(\.\d+)?$/.test(tok)){ pos = tok; posSet = true; return; }
+    if(!ref && /^\d{6,}$/.test(tok)){ ref = tok; return; }
+    if(posSet && !cantSet && /^\d+$/.test(tok) && tok.length < 6){ cant = tok; cantSet = true; return; }
+    denomParts.push(tok);
+  });
+  // Fallback: some sections encode the part code as a trailing alphanumeric
+  // token with dashes (e.g. "ZO-200-95", "4726-01-01") instead of a plain
+  // 6+ digit number — pull it out of the denomination if nothing matched yet.
+  if(!ref && denomParts.length){
+    var last = denomParts[denomParts.length-1];
+    if(/^[A-Za-z0-9]+-[A-Za-z0-9-]+$/.test(last) && /\d/.test(last)){
+      ref = last;
+      denomParts = denomParts.slice(0, -1);
+    }
+  }
+  return {pos:pos, ref:ref, cant:cant, denominacio:denomParts.join(' '), page:page};
+}
+
+// -- Create group flow --
+els.createGroupBtn.addEventListener('click', function(){
+  if(state.selected.size === 0) return;
+  els.groupNameInput.value = '';
+  els.nameModalOverlay.classList.add('open');
+  els.groupNameInput.focus();
+});
+els.nameModalCancel.addEventListener('click', function(){
+  els.nameModalOverlay.classList.remove('open');
+});
+els.nameModalOverlay.addEventListener('click', function(e){
+  if(e.target === els.nameModalOverlay) els.nameModalOverlay.classList.remove('open');
+});
+els.groupNameInput.addEventListener('keydown', function(e){
+  if(e.key === 'Enter') els.nameModalCreate.click();
+});
+els.nameModalCreate.addEventListener('click', function(){
+  var name = els.groupNameInput.value.trim();
+  if(!name){ showToast('Posa un nom al grup.'); return; }
+  els.nameModalOverlay.classList.remove('open');
+  createGroupFromSelection(name);
+});
+
+function createGroupFromSelection(name){
+  var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
+  setStatus('Extraient text de ' + pages.length + ' pàgines…');
+  Promise.all(pages.map(extractRowsFromPage)).then(function(rowsPerPage){
+    var rows = [].concat.apply([], rowsPerPage);
+    var group = {id: uid(), name: name, pages: pages, rows: rows};
+    state.groups.push(group);
+    persistGroups();
+    renderGroupsPanel();
+    setStatus('');
+    openGroupReview(group.id, true);
+  }).catch(function(err){
+    console.error(err);
+    setStatus('');
+    showToast('Error extraient el text: ' + err.message, 4000);
+  });
+}
+
+// -- Groups panel --
+function renderGroupsPanel(){
+  els.groupsPanel.style.display = state.groups.length ? 'block' : 'none';
+  els.groupsList.innerHTML = '';
+  state.groups.forEach(function(g){
+    var chip = document.createElement('div');
+    chip.className = 'groupChip';
+    var nameEl = document.createElement('div');
+    nameEl.className = 'gName';
+    nameEl.textContent = g.name;
+    var metaEl = document.createElement('div');
+    metaEl.className = 'gMeta';
+    metaEl.textContent = g.pages.length + (g.pages.length===1?' pàgina · ':' pàgines · ') +
+      g.rows.length + (g.rows.length===1?' fila':' files');
+    var delBtn = document.createElement('button');
+    delBtn.className = 'gDel';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('click', function(e){
+      e.stopPropagation();
+      deleteGroup(g.id);
+    });
+    chip.appendChild(nameEl);
+    chip.appendChild(metaEl);
+    chip.appendChild(delBtn);
+    chip.addEventListener('click', function(){ openGroupReview(g.id, false); });
+    els.groupsList.appendChild(chip);
+  });
+}
+
+function deleteGroup(id){
+  state.groups = state.groups.filter(function(g){ return g.id !== id; });
+  persistGroups();
+  renderGroupsPanel();
+}
+
+// -- Group review modal --
+function openGroupReview(id, isNew){
+  var g = state.groups.find(function(x){ return x.id === id; });
+  if(!g) return;
+  state.editingGroup = {
+    id: g.id,
+    isNew: !!isNew,
+    rows: g.rows.map(function(r){
+      return {pos:r.pos, ref:r.ref, cant:r.cant, denominacio:r.denominacio, page:r.page};
+    }),
+    pages: g.pages.slice()
+  };
+  els.reviewNameInput.value = g.name;
+  els.reviewPagesLabel.textContent = 'Pàgines: ' + g.pages.join(', ');
+  els.reviewThumbs.innerHTML = '';
+  g.pages.forEach(function(p){
+    var c = document.createElement('canvas');
+    els.reviewThumbs.appendChild(c);
+    renderPageToCanvas(p, c, 260).catch(function(err){ console.warn('preview render', p, err); });
+  });
+  renderReviewTable();
+  els.groupModalOverlay.classList.add('open');
+}
+
+function renderReviewTable(){
+  var rows = state.editingGroup.rows;
+  els.reviewTableBody.innerHTML = '';
+  rows.forEach(function(row, idx){
+    var tr = document.createElement('tr');
+
+    var tdPos = document.createElement('td'); tdPos.className = 'posCol';
+    var inPos = document.createElement('input'); inPos.type = 'text'; inPos.value = row.pos;
+    inPos.addEventListener('input', function(){ row.pos = inPos.value; });
+    tdPos.appendChild(inPos); tr.appendChild(tdPos);
+
+    var tdRef = document.createElement('td'); tdRef.className = 'refCol';
+    var inRef = document.createElement('input'); inRef.type = 'text'; inRef.value = row.ref;
+    inRef.addEventListener('input', function(){ row.ref = inRef.value; });
+    tdRef.appendChild(inRef); tr.appendChild(tdRef);
+
+    var tdCant = document.createElement('td'); tdCant.className = 'cantCol';
+    var inCant = document.createElement('input'); inCant.type = 'text'; inCant.value = row.cant;
+    inCant.addEventListener('input', function(){ row.cant = inCant.value; });
+    tdCant.appendChild(inCant); tr.appendChild(tdCant);
+
+    var tdDen = document.createElement('td');
+    var inDen = document.createElement('input'); inDen.type = 'text'; inDen.value = row.denominacio;
+    inDen.addEventListener('input', function(){ row.denominacio = inDen.value; });
+    tdDen.appendChild(inDen); tr.appendChild(tdDen);
+
+    var tdRm = document.createElement('td'); tdRm.className = 'rmCol';
+    var rmBtn = document.createElement('button'); rmBtn.className = 'rmRowBtn'; rmBtn.textContent = '✕';
+    rmBtn.addEventListener('click', function(){
+      state.editingGroup.rows.splice(idx, 1);
+      renderReviewTable();
+    });
+    tdRm.appendChild(rmBtn); tr.appendChild(tdRm);
+
+    els.reviewTableBody.appendChild(tr);
+  });
+}
+
+els.addRowBtn.addEventListener('click', function(){
+  state.editingGroup.rows.push({pos:'', ref:'', cant:'', denominacio:'', page: state.editingGroup.pages[0]});
+  renderReviewTable();
+});
+
+els.reviewCancelBtn.addEventListener('click', function(){
+  var wasNew = state.editingGroup && state.editingGroup.isNew;
+  var id = state.editingGroup && state.editingGroup.id;
+  closeGroupReview();
+  if(wasNew) deleteGroup(id);
+});
+els.groupModalOverlay.addEventListener('click', function(e){
+  if(e.target === els.groupModalOverlay) els.reviewCancelBtn.click();
+});
+document.addEventListener('keydown', function(e){
+  if(e.key !== 'Escape') return;
+  if(els.nameModalOverlay.classList.contains('open')) els.nameModalOverlay.classList.remove('open');
+  if(els.groupModalOverlay.classList.contains('open')) els.reviewCancelBtn.click();
+});
+
+els.reviewSaveBtn.addEventListener('click', function(){
+  var eg = state.editingGroup;
+  if(!eg) return;
+  var name = els.reviewNameInput.value.trim();
+  if(!name){ showToast('Posa un nom al grup.'); return; }
+  var g = state.groups.find(function(x){ return x.id === eg.id; });
+  if(g){
+    g.name = name;
+    g.rows = eg.rows;
+  }
+  persistGroups();
+  renderGroupsPanel();
+  closeGroupReview();
+});
+
+els.deleteGroupBtn.addEventListener('click', function(){
+  var eg = state.editingGroup;
+  if(!eg) return;
+  closeGroupReview();
+  deleteGroup(eg.id);
+});
+
+function closeGroupReview(){
+  els.groupModalOverlay.classList.remove('open');
+  state.editingGroup = null;
+}
+
+// -- Export catalog JSON --
+els.exportCatalogBtn.addEventListener('click', function(){
+  if(!state.groups.length){ showToast('No hi ha cap grup creat.'); return; }
+  var payload = {
+    sourceFile: state.fileName + '.pdf',
+    exportedAt: new Date().toISOString(),
+    groups: state.groups.map(function(g){
+      return {name:g.name, pages:g.pages, rows:g.rows};
+    })
+  };
+  var blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = state.fileName + '_catalog.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+});
 
 // ---- Export ----
 els.exportBtn.addEventListener('click', function(){
