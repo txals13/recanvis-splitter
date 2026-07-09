@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Separador de fulles de recanvis</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222c; --border:#2a2f3a;
+    --text:#e8eaed; --muted:#9aa3b2; --accent:#4f8cff; --accent2:#2f6fe0;
+    --ok:#2ecc71; --danger:#e74c3c;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    background:var(--bg); color:var(--text); min-height:100vh;
+  }
+  header{
+    position:sticky; top:0; z-index:20; background:var(--panel);
+    border-bottom:1px solid var(--border); padding:12px 16px;
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+  }
+  header h1{font-size:16px; margin:0 12px 0 0; white-space:nowrap; font-weight:600;}
+  .spacer{flex:1;}
+  button{
+    background:var(--panel2); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:8px 12px; font-size:13px; cursor:pointer;
+  }
+  button:hover:not(:disabled){border-color:var(--accent);}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  button.primary{background:var(--accent2); border-color:var(--accent2); color:#fff; font-weight:600;}
+  button.primary:hover:not(:disabled){background:var(--accent);}
+  input[type=text]{
+    background:var(--panel2); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:8px 10px; font-size:13px; width:180px;
+  }
+  #dropzone{
+    margin:40px auto; max-width:560px; border:2px dashed var(--border);
+    border-radius:12px; padding:48px 24px; text-align:center; color:var(--muted);
+  }
+  #dropzone.drag{border-color:var(--accent); color:var(--text);}
+  #dropzone input[type=file]{display:none;}
+  #dropzone .browse{color:var(--accent); text-decoration:underline; cursor:pointer;}
+  #fileInfo{font-size:13px; color:var(--muted); white-space:nowrap;}
+  #status{font-size:13px; color:var(--muted); padding:0 16px;}
+  #grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr));
+    gap:14px; padding:16px;
+  }
+  .cell{
+    background:var(--panel); border:2px solid var(--border); border-radius:8px;
+    cursor:pointer; position:relative; overflow:hidden; user-select:none;
+    transition:border-color .1s;
+  }
+  .cell.selected{border-color:var(--accent);}
+  .thumbWrap{
+    background:#0a0b0e; display:flex; align-items:center; justify-content:center;
+    min-height:120px;
+  }
+  .cell canvas{display:block; width:100%; height:auto;}
+  .cellFooter{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:6px 8px; font-size:12px; color:var(--muted);
+  }
+  .pageNum{font-weight:600; color:var(--text);}
+  .check{
+    width:16px; height:16px; border-radius:4px; border:1.5px solid var(--border);
+    background:var(--panel2); display:flex; align-items:center; justify-content:center;
+  }
+  .cell.selected .check{background:var(--accent); border-color:var(--accent);}
+  .check::after{content:""; width:8px; height:5px; border-left:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(-45deg) translateY(-1px); display:none;}
+  .cell.selected .check::after{display:block;}
+  .zoomBtn{
+    position:absolute; top:6px; right:6px; width:26px; height:26px; border-radius:6px;
+    background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.2); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:13px; opacity:0;
+    transition:opacity .1s;
+  }
+  .cell:hover .zoomBtn{opacity:1;}
+  #modalOverlay{
+    position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:100;
+    display:none; align-items:center; justify-content:center; flex-direction:column;
+  }
+  #modalOverlay.open{display:flex;}
+  #modalTop{display:flex; align-items:center; gap:16px; color:var(--text); margin-bottom:10px;}
+  #modalImgWrap{max-width:92vw; max-height:78vh; overflow:auto; background:#0a0b0e; border-radius:8px;}
+  #modalImgWrap canvas{display:block; max-width:none;}
+  #modalOverlay button{padding:8px 14px;}
+  .placeholder{color:var(--muted); font-size:24px;}
+  #emptyState{display:none; text-align:center; color:var(--muted); padding:60px 20px;}
+  footer{
+    position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--border);
+    padding:10px 16px; display:none; align-items:center; gap:12px; flex-wrap:wrap;
+  }
+  #selCount{font-size:13px; color:var(--text);}
+  #toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+    background:var(--panel2); border:1px solid var(--border); padding:10px 16px;
+    border-radius:8px; font-size:13px; z-index:200; display:none;
+  }
+</style>
+</head>
+<body>
+
+<header id="mainHeader" style="display:none;">
+  <h1>Separador de fulles de recanvis</h1>
+  <div id="fileInfo"></div>
+  <div class="spacer"></div>
+  <input type="text" id="rangeInput" placeholder="ex: 81-194, 341">
+  <button id="addRangeBtn">Afegeix pàgines</button>
+  <button id="selectAllBtn">Selecciona-ho tot</button>
+  <button id="clearSelBtn">Neteja selecció</button>
+  <button id="newFileBtn">Obre un altre PDF</button>
+</header>
+
+<div id="status"></div>
+
+<div id="dropzone">
+  <p>Arrossega aquí el manual PDF<br>o</p>
+  <label class="browse">tria un fitxer<input type="file" id="fileInput" accept="application/pdf"></label>
+</div>
+
+<div id="emptyState"></div>
+<div id="grid"></div>
+
+<footer id="footerBar">
+  <span id="selCount">0 pàgines seleccionades</span>
+  <div class="spacer"></div>
+  <button class="primary" id="exportBtn" disabled>Genera PDF de recanvis</button>
+</footer>
+
+<div id="modalOverlay">
+  <div id="modalTop">
+    <button id="modalPrev">◀ Anterior</button>
+    <span id="modalPageLabel"></span>
+    <button id="modalNext">Següent ▶</button>
+    <button id="modalToggle">Selecciona aquesta pàgina</button>
+    <button id="modalClose">Tanca ✕</button>
+  </div>
+  <div id="modalImgWrap"><canvas id="modalCanvas"></canvas></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+function loadScript(urls){
+  return new Promise((resolve, reject)=>{
+    var i=0;
+    function tryNext(){
+      if(i>=urls.length){reject(new Error("No s'ha pogut carregar cap script"));return;}
+      var s=document.createElement('script');
+      s.src=urls[i];
+      s.onload=resolve;
+      s.onerror=function(){ i++; tryNext(); };
+      document.head.appendChild(s);
+    }
+    tryNext();
+  });
+}
+
+var pdfjsReady = loadScript([
+  'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+]).then(function(){
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+});
+
+var pdfLibReady = loadScript([
+  'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'
+]);
+
+var els = {
+  header: document.getElementById('mainHeader'),
+  fileInfo: document.getElementById('fileInfo'),
+  status: document.getElementById('status'),
+  dropzone: document.getElementById('dropzone'),
+  fileInput: document.getElementById('fileInput'),
+  grid: document.getElementById('grid'),
+  footer: document.getElementById('footerBar'),
+  selCount: document.getElementById('selCount'),
+  exportBtn: document.getElementById('exportBtn'),
+  rangeInput: document.getElementById('rangeInput'),
+  addRangeBtn: document.getElementById('addRangeBtn'),
+  selectAllBtn: document.getElementById('selectAllBtn'),
+  clearSelBtn: document.getElementById('clearSelBtn'),
+  newFileBtn: document.getElementById('newFileBtn'),
+  modalOverlay: document.getElementById('modalOverlay'),
+  modalCanvas: document.getElementById('modalCanvas'),
+  modalPageLabel: document.getElementById('modalPageLabel'),
+  modalPrev: document.getElementById('modalPrev'),
+  modalNext: document.getElementById('modalNext'),
+  modalToggle: document.getElementById('modalToggle'),
+  modalClose: document.getElementById('modalClose'),
+  toast: document.getElementById('toast')
+};
+
+var state = {
+  pdfDoc: null,
+  pdfBytes: null,
+  fileName: '',
+  numPages: 0,
+  selected: new Set(),
+  cells: [],
+  modalPage: 1,
+  renderQueue: [],
+  activeRenders: 0
+};
+
+function showToast(msg, ms){
+  els.toast.textContent = msg;
+  els.toast.style.display = 'block';
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(function(){ els.toast.style.display='none'; }, ms||2500);
+}
+
+function setStatus(msg){ els.status.textContent = msg || ''; }
+
+// ---- File loading ----
+['dragover','dragenter'].forEach(function(ev){
+  els.dropzone.addEventListener(ev, function(e){ e.preventDefault(); els.dropzone.classList.add('drag'); });
+});
+['dragleave','drop'].forEach(function(ev){
+  els.dropzone.addEventListener(ev, function(e){ e.preventDefault(); els.dropzone.classList.remove('drag'); });
+});
+els.dropzone.addEventListener('drop', function(e){
+  var f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if(f) handleFile(f);
+});
+els.fileInput.addEventListener('change', function(e){
+  var f = e.target.files[0];
+  if(f) handleFile(f);
+});
+els.newFileBtn.addEventListener('click', function(){
+  resetApp();
+});
+
+function resetApp(){
+  state.pdfDoc = null; state.pdfBytes = null; state.numPages = 0;
+  state.selected = new Set(); state.cells = [];
+  els.grid.innerHTML = '';
+  els.header.style.display = 'none';
+  els.footer.style.display = 'none';
+  els.dropzone.style.display = 'block';
+  els.fileInput.value = '';
+  setStatus('');
+}
+
+function handleFile(file){
+  if(file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)){
+    showToast('El fitxer ha de ser un PDF.');
+    return;
+  }
+  els.dropzone.style.display = 'none';
+  setStatus('Carregant "' + file.name + '"…');
+  state.fileName = file.name.replace(/\.pdf$/i,'');
+  var reader = new FileReader();
+  reader.onload = function(e){
+    state.pdfBytes = new Uint8Array(e.target.result);
+    loadPdf(state.pdfBytes.slice());
+  };
+  reader.onerror = function(){ setStatus(''); showToast('Error llegint el fitxer.'); els.dropzone.style.display='block'; };
+  reader.readAsArrayBuffer(file);
+}
+
+function loadPdf(bytesForPdfjs){
+  pdfjsReady.then(function(){
+    return pdfjsLib.getDocument({ data: bytesForPdfjs }).promise;
+  }).then(function(doc){
+    state.pdfDoc = doc;
+    state.numPages = doc.numPages;
+    buildGrid();
+    els.header.style.display = 'flex';
+    els.footer.style.display = 'flex';
+    els.fileInfo.textContent = state.fileName + '.pdf — ' + state.numPages + ' pàgines';
+    setStatus('');
+    updateSelCount();
+  }).catch(function(err){
+    console.error(err);
+    setStatus('');
+    showToast('No s\'ha pogut obrir el PDF: ' + err.message);
+    els.dropzone.style.display = 'block';
+  });
+}
+
+// ---- Grid / thumbnails ----
+function buildGrid(){
+  els.grid.innerHTML = '';
+  state.cells = [];
+  var frag = document.createDocumentFragment();
+  for(var p=1; p<=state.numPages; p++){
+    var cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.dataset.page = p;
+
+    var thumbWrap = document.createElement('div');
+    thumbWrap.className = 'thumbWrap';
+    var canvas = document.createElement('canvas');
+    thumbWrap.appendChild(canvas);
+    cell.appendChild(thumbWrap);
+
+    var zoomBtn = document.createElement('div');
+    zoomBtn.className = 'zoomBtn';
+    zoomBtn.textContent = '🔍';
+    zoomBtn.addEventListener('click', function(e){
+      e.stopPropagation();
+      openModal(parseInt(e.currentTarget.parentElement.dataset.page,10));
+    });
+    cell.appendChild(zoomBtn);
+
+    var footerRow = document.createElement('div');
+    footerRow.className = 'cellFooter';
+    var pageNum = document.createElement('span');
+    pageNum.className = 'pageNum';
+    pageNum.textContent = p;
+    var check = document.createElement('span');
+    check.className = 'check';
+    footerRow.appendChild(pageNum);
+    footerRow.appendChild(check);
+    cell.appendChild(footerRow);
+
+    cell.addEventListener('click', function(e){
+      toggleSelect(parseInt(e.currentTarget.dataset.page,10));
+    });
+
+    frag.appendChild(cell);
+    state.cells.push({el: cell, canvas: canvas, rendered:false, page:p});
+  }
+  els.grid.appendChild(frag);
+  setupLazyRender();
+}
+
+var io;
+function setupLazyRender(){
+  if(io) io.disconnect();
+  io = new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if(entry.isIntersecting){
+        var page = parseInt(entry.target.dataset.page,10);
+        queueRender(page);
+        io.unobserve(entry.target);
+      }
+    });
+  }, {root:null, rootMargin:'400px 0px', threshold:0.01});
+  state.cells.forEach(function(c){ io.observe(c.el); });
+}
+
+function queueRender(page){
+  state.renderQueue.push(page);
+  pumpRenderQueue();
+}
+function pumpRenderQueue(){
+  while(state.activeRenders < 4 && state.renderQueue.length){
+    var page = state.renderQueue.shift();
+    renderThumb(page);
+  }
+}
+function renderThumb(page){
+  var cellInfo = state.cells[page-1];
+  if(!cellInfo || cellInfo.rendered) return;
+  cellInfo.rendered = true;
+  state.activeRenders++;
+  state.pdfDoc.getPage(page).then(function(pdfPage){
+    var vp0 = pdfPage.getViewport({scale:1});
+    var targetWidth = 220;
+    var scale = targetWidth / vp0.width;
+    var viewport = pdfPage.getViewport({scale: scale});
+    var canvas = cellInfo.canvas;
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    var ctx = canvas.getContext('2d');
+    return pdfPage.render({canvasContext: ctx, viewport: viewport}).promise;
+  }).catch(function(err){
+    console.warn('Error rendering page', page, err);
+  }).then(function(){
+    state.activeRenders--;
+    pumpRenderQueue();
+  });
+}
+
+function toggleSelect(page){
+  var cellInfo = state.cells[page-1];
+  if(state.selected.has(page)){
+    state.selected.delete(page);
+    cellInfo.el.classList.remove('selected');
+  } else {
+    state.selected.add(page);
+    cellInfo.el.classList.add('selected');
+  }
+  updateSelCount();
+  if(els.modalOverlay.classList.contains('open') && state.modalPage === page){
+    updateModalToggleLabel();
+  }
+}
+
+function updateSelCount(){
+  var n = state.selected.size;
+  els.selCount.textContent = n + (n===1 ? ' pàgina seleccionada' : ' pàgines seleccionades');
+  els.exportBtn.disabled = n === 0;
+}
+
+// ---- Toolbar actions ----
+els.selectAllBtn.addEventListener('click', function(){
+  for(var p=1;p<=state.numPages;p++){
+    state.selected.add(p);
+    state.cells[p-1].el.classList.add('selected');
+  }
+  updateSelCount();
+});
+els.clearSelBtn.addEventListener('click', function(){
+  state.selected.forEach(function(p){ state.cells[p-1].el.classList.remove('selected'); });
+  state.selected.clear();
+  updateSelCount();
+});
+els.addRangeBtn.addEventListener('click', applyRangeInput);
+els.rangeInput.addEventListener('keydown', function(e){
+  if(e.key === 'Enter') applyRangeInput();
+});
+function applyRangeInput(){
+  var raw = els.rangeInput.value.trim();
+  if(!raw) return;
+  var parts = raw.split(',');
+  var added = 0;
+  parts.forEach(function(part){
+    part = part.trim();
+    if(!part) return;
+    var m = part.match(/^(\d+)\s*-\s*(\d+)$/);
+    if(m){
+      var a = parseInt(m[1],10), b = parseInt(m[2],10);
+      if(a>b){ var t=a; a=b; b=t; }
+      for(var p=a; p<=b; p++){
+        if(p>=1 && p<=state.numPages && !state.selected.has(p)){
+          state.selected.add(p);
+          state.cells[p-1].el.classList.add('selected');
+          added++;
+        }
+      }
+    } else if(/^\d+$/.test(part)){
+      var n = parseInt(part,10);
+      if(n>=1 && n<=state.numPages && !state.selected.has(n)){
+        state.selected.add(n);
+        state.cells[n-1].el.classList.add('selected');
+        added++;
+      }
+    }
+  });
+  updateSelCount();
+  els.rangeInput.value = '';
+  if(added){
+    var first = Math.min.apply(null, Array.from(state.selected));
+    var target = state.cells[first-1];
+    if(target) target.el.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+}
+
+// ---- Modal preview ----
+function openModal(page){
+  state.modalPage = page;
+  els.modalOverlay.classList.add('open');
+  renderModalPage(page);
+}
+function renderModalPage(page){
+  els.modalPageLabel.textContent = 'Pàgina ' + page + ' de ' + state.numPages;
+  updateModalToggleLabel();
+  state.pdfDoc.getPage(page).then(function(pdfPage){
+    var vp0 = pdfPage.getViewport({scale:1});
+    var maxWidth = Math.min(window.innerWidth*0.9, 1100);
+    var scale = maxWidth / vp0.width;
+    var viewport = pdfPage.getViewport({scale: scale});
+    els.modalCanvas.width = viewport.width;
+    els.modalCanvas.height = viewport.height;
+    var ctx = els.modalCanvas.getContext('2d');
+    return pdfPage.render({canvasContext: ctx, viewport: viewport}).promise;
+  });
+}
+function updateModalToggleLabel(){
+  els.modalToggle.textContent = state.selected.has(state.modalPage)
+    ? '✓ Pàgina seleccionada (treu-la)'
+    : 'Selecciona aquesta pàgina';
+}
+els.modalPrev.addEventListener('click', function(){
+  if(state.modalPage > 1){ state.modalPage--; renderModalPage(state.modalPage); }
+});
+els.modalNext.addEventListener('click', function(){
+  if(state.modalPage < state.numPages){ state.modalPage++; renderModalPage(state.modalPage); }
+});
+els.modalToggle.addEventListener('click', function(){
+  toggleSelect(state.modalPage);
+  updateModalToggleLabel();
+});
+els.modalClose.addEventListener('click', closeModal);
+els.modalOverlay.addEventListener('click', function(e){
+  if(e.target === els.modalOverlay) closeModal();
+});
+document.addEventListener('keydown', function(e){
+  if(!els.modalOverlay.classList.contains('open')) return;
+  if(e.key === 'Escape') closeModal();
+  if(e.key === 'ArrowLeft') els.modalPrev.click();
+  if(e.key === 'ArrowRight') els.modalNext.click();
+  if(e.key === ' '){ e.preventDefault(); els.modalToggle.click(); }
+});
+function closeModal(){
+  els.modalOverlay.classList.remove('open');
+}
+
+// ---- Export ----
+els.exportBtn.addEventListener('click', function(){
+  if(state.selected.size === 0) return;
+  els.exportBtn.disabled = true;
+  var originalLabel = els.exportBtn.textContent;
+  els.exportBtn.textContent = 'Generant PDF…';
+  var pagesSorted = Array.from(state.selected).sort(function(a,b){return a-b;});
+  var indices = pagesSorted.map(function(p){ return p-1; });
+  pdfLibReady.then(function(){
+    return Promise.all([
+      PDFLib.PDFDocument.load(state.pdfBytes),
+      PDFLib.PDFDocument.create()
+    ]);
+  }).then(function(docs){
+    var srcDoc = docs[0], newDoc = docs[1];
+    return newDoc.copyPages(srcDoc, indices).then(function(copiedPages){
+      copiedPages.forEach(function(pg){ newDoc.addPage(pg); });
+      return newDoc.save();
+    });
+  }).then(function(bytes){
+    var blob = new Blob([bytes], {type:'application/pdf'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = state.fileName + '_recanvis.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+    showToast('PDF generat: ' + state.selected.size + ' pàgines.');
+  }).catch(function(err){
+    console.error(err);
+    showToast('Error generant el PDF: ' + err.message, 4000);
+  }).then(function(){
+    els.exportBtn.disabled = state.selected.size === 0;
+    els.exportBtn.textContent = originalLabel;
+  });
+});
+</script>
+</body>
+</html>
