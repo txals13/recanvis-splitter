@@ -797,20 +797,24 @@ els.createGroupBtn.addEventListener('click', function(){
   pendingNameAction = 'group';
   pendingGroupId = null;
   pendingPages = null;
-  els.nameModalLabel.textContent = 'Nom del grup';
-  els.groupNameInput.value = '';
-  els.nameModalOverlay.classList.add('open');
-  els.groupNameInput.focus();
   var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
-  if(pages.length){
-    suggestNameFromPages(pages).then(function(name){
-      if(name && pendingNameAction === 'group'){
-        els.groupNameInput.value = name;
-        els.groupNameInput.select();
-      }
-    });
-  }
+  openNameModalWithSuggestion('Nom del grup', pages, els.createGroupBtn);
 });
+
+// Resolves the suggested name BEFORE showing the modal, so the field is
+// already filled in when it appears (no race with the user clicking "Crea").
+function openNameModalWithSuggestion(label, pages, btn){
+  var originalLabel = btn ? btn.textContent : null;
+  if(btn){ btn.disabled = true; btn.textContent = 'Cercant nom…'; }
+  suggestNameFromPages(pages).then(function(name){
+    if(btn){ btn.disabled = false; btn.textContent = originalLabel; }
+    els.nameModalLabel.textContent = label;
+    els.groupNameInput.value = name || '';
+    els.nameModalOverlay.classList.add('open');
+    els.groupNameInput.focus();
+    els.groupNameInput.select();
+  });
+}
 els.nameModalCancel.addEventListener('click', cancelNameModal);
 els.nameModalOverlay.addEventListener('click', function(e){
   if(e.target === els.nameModalOverlay) cancelNameModal();
@@ -953,16 +957,7 @@ els.addConjuntBtn.addEventListener('click', function(){
   pendingGroupId = state.currentGroupId;
   pendingPages = Array.from(state.selected).sort(function(a,b){ return a-b; });
   els.groupDetailOverlay.classList.remove('open'); // avoid stacking two overlays
-  els.nameModalLabel.textContent = 'Nom del conjunt';
-  els.groupNameInput.value = '';
-  els.nameModalOverlay.classList.add('open');
-  els.groupNameInput.focus();
-  suggestNameFromPages(pendingPages).then(function(name){
-    if(name && pendingNameAction === 'conjunt'){
-      els.groupNameInput.value = name;
-      els.groupNameInput.select();
-    }
-  });
+  openNameModalWithSuggestion('Nom del conjunt', pendingPages, els.addConjuntBtn);
 });
 
 function addConjuntToGroup(groupId, name, pages){
