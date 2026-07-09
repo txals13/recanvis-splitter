@@ -99,30 +99,30 @@
     border-radius:8px; font-size:13px; z-index:200; display:none;
   }
 
-  /* ---- Groups ---- */
-  #groupsPanel{
+  /* ---- Conjunts (top-level) ---- */
+  #conjuntsPanel{
     display:none; border-bottom:1px solid var(--border); padding:12px 16px;
     background:var(--panel);
   }
-  #groupsPanelHeader{
+  #conjuntsPanelHeader{
     display:flex; align-items:center; gap:12px; margin-bottom:10px;
   }
-  #groupsPanelHeader strong{font-size:13px;}
-  #groupsList{display:flex; flex-wrap:wrap; gap:10px;}
-  .groupChip{
+  #conjuntsPanelHeader strong{font-size:13px;}
+  #conjuntChipsList{display:flex; flex-wrap:wrap; gap:10px;}
+  .conjuntChip{
     background:var(--panel2); border:1px solid var(--border); border-radius:8px;
     padding:8px 10px; cursor:pointer; position:relative; min-width:150px;
     max-width:220px;
   }
-  .groupChip:hover{border-color:var(--accent);}
-  .groupChip .gName{font-size:13px; font-weight:600; margin-right:16px; word-break:break-word;}
-  .groupChip .gMeta{font-size:11px; color:var(--muted); margin-top:4px;}
-  .groupChip .gDel{
+  .conjuntChip:hover{border-color:var(--accent);}
+  .conjuntChip .gName{font-size:13px; font-weight:600; margin-right:16px; word-break:break-word;}
+  .conjuntChip .gMeta{font-size:11px; color:var(--muted); margin-top:4px;}
+  .conjuntChip .gDel{
     position:absolute; top:6px; right:6px; width:18px; height:18px; line-height:16px;
     text-align:center; border-radius:4px; background:transparent; color:var(--muted);
     font-size:12px; border:1px solid transparent;
   }
-  .groupChip .gDel:hover{border-color:var(--danger); color:var(--danger);}
+  .conjuntChip .gDel:hover{border-color:var(--danger); color:var(--danger);}
 
   .overlay{
     position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:100;
@@ -151,26 +151,43 @@
   table.rowsTable td.posCol input{width:60px;}
   table.rowsTable td.cantCol input{width:60px;}
   table.rowsTable td.refCol input{width:120px;}
+  table.rowsTable td.subCol input{width:110px;}
   table.rowsTable td.rmCol{width:30px;}
   .rmRowBtn{width:26px; height:26px; padding:0; color:var(--danger); border-color:var(--border);}
   .reviewActions{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
   .reviewActions .left{display:flex; gap:8px;}
   .reviewActions .right{display:flex; gap:8px;}
+  #reviewPendingPanel{
+    display:none; background:var(--panel2); border:1px dashed var(--border);
+    border-radius:8px; padding:20px; text-align:center; margin-bottom:16px;
+  }
+  #reviewPendingPanel p{margin:0 0 12px; color:var(--muted); font-size:13px;}
 
-  #groupDetailCard{width:min(640px,92vw);}
-  #conjuntsList{margin-bottom:12px;}
-  .conjuntRow{
+  #conjuntDetailCard{width:min(640px,92vw);}
+  #grupsList{margin-bottom:12px;}
+  .grupRow{
     display:flex; align-items:center; justify-content:space-between; gap:10px;
     background:var(--panel2); border:1px solid var(--border); border-radius:8px;
     padding:10px 12px; margin-bottom:8px; cursor:pointer;
   }
-  .conjuntRow:hover{border-color:var(--accent);}
-  .conjuntRow .cInfo{display:flex; flex-direction:column; gap:2px;}
-  .conjuntRow .cName{font-size:13px; font-weight:600;}
-  .conjuntRow .cMeta{font-size:11px; color:var(--muted);}
-  .conjuntRow .cDel{color:var(--danger); flex-shrink:0;}
-  #groupDetailEmpty{color:var(--muted); font-size:13px; padding:4px 0 12px;}
-  #addConjuntBtn{margin-bottom:4px;}
+  .grupRow:hover{border-color:var(--accent);}
+  .grupRow.pending{border-style:dashed;}
+  .grupRow .cInfo{display:flex; flex-direction:column; gap:2px;}
+  .grupRow .cName{font-size:13px; font-weight:600;}
+  .grupRow .cMeta{font-size:11px; color:var(--muted);}
+  .grupRow.pending .cMeta{color:#e0a94f;}
+  .grupRow .cDel{color:var(--danger); flex-shrink:0;}
+  #conjuntDetailEmpty{color:var(--muted); font-size:13px; padding:4px 0 12px;}
+  #addGrupBtn, #importMenuBtn{margin-bottom:4px; margin-right:8px;}
+
+  #menuImportCard{width:min(480px,92vw); max-height:80vh; overflow:auto;}
+  #menuImportList{margin:14px 0; display:flex; flex-direction:column; gap:6px;}
+  .menuImportRow{
+    display:flex; align-items:center; gap:10px; font-size:13px;
+    background:var(--panel2); border:1px solid var(--border); border-radius:6px;
+    padding:8px 10px; cursor:pointer;
+  }
+  .menuImportRow input{width:auto;}
 </style>
 </head>
 <body>
@@ -183,16 +200,16 @@
   <button id="addRangeBtn">Afegeix pàgines</button>
   <button id="selectAllBtn">Selecciona-ho tot</button>
   <button id="clearSelBtn">Neteja selecció</button>
-  <button id="createGroupBtn">Crea un grup</button>
+  <button id="createConjuntBtn">Crea un conjunt</button>
   <button id="newFileBtn">Obre un altre PDF</button>
 </header>
 
-<div id="groupsPanel">
-  <div id="groupsPanelHeader">
-    <strong>Grups de dibuix</strong>
+<div id="conjuntsPanel">
+  <div id="conjuntsPanelHeader">
+    <strong>Conjunts</strong>
     <button id="exportCatalogBtn">Exporta catàleg (JSON)</button>
   </div>
-  <div id="groupsList"></div>
+  <div id="conjuntChipsList"></div>
 </div>
 
 <div id="status"></div>
@@ -233,29 +250,50 @@
   </div>
 </div>
 
-<div class="overlay" id="groupDetailOverlay">
-  <div class="reviewCard" id="groupDetailCard">
+<div class="overlay" id="conjuntDetailOverlay">
+  <div class="reviewCard" id="conjuntDetailCard">
     <div class="reviewTop">
-      <input type="text" id="groupDetailNameInput">
-      <button id="groupDetailCloseBtn">Tanca ✕</button>
+      <input type="text" id="conjuntDetailNameInput">
+      <button id="conjuntDetailCloseBtn">Tanca ✕</button>
     </div>
-    <div id="conjuntsList"></div>
-    <div id="groupDetailEmpty" style="display:none;">Aquest grup encara no té cap conjunt.</div>
-    <button id="addConjuntBtn">+ Afegeix un conjunt amb la selecció actual</button>
+    <div id="grupsList"></div>
+    <div id="conjuntDetailEmpty" style="display:none;">Aquest conjunt encara no té cap grup.</div>
+    <button id="addGrupBtn">+ Afegeix un grup amb la selecció actual</button>
+    <button id="importMenuBtn" disabled>Importa grups des d'una pàgina de menú</button>
     <div class="reviewActions" style="margin-top:16px;">
       <div class="left">
-        <button id="deleteGroupDetailBtn">Elimina el grup</button>
+        <button id="deleteConjuntBtn">Elimina el conjunt</button>
       </div>
       <div class="right"></div>
     </div>
   </div>
 </div>
 
-<div class="overlay" id="groupModalOverlay">
+<div class="overlay" id="menuImportOverlay">
+  <div class="reviewCard" id="menuImportCard">
+    <div class="reviewTop">
+      <strong>Entrades trobades al menú</strong>
+    </div>
+    <div id="menuImportList"></div>
+    <div class="reviewActions">
+      <div class="left"></div>
+      <div class="right">
+        <button id="menuImportCancel">Cancel·la</button>
+        <button class="primary" id="menuImportConfirm">Importa</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="grupModalOverlay">
   <div class="reviewCard">
     <div class="reviewTop">
       <input type="text" id="reviewNameInput">
       <span id="reviewPagesLabel" style="color:var(--muted); font-size:12px;"></span>
+    </div>
+    <div id="reviewPendingPanel">
+      <p>Aquest grup encara no té cap pàgina assignada.</p>
+      <button id="assignPagesBtn">Selecciona pàgines a la graella primer</button>
     </div>
     <div class="reviewThumbs" id="reviewThumbs"></div>
     <table class="rowsTable" id="reviewTable">
@@ -264,6 +302,7 @@
           <th class="posCol">Pos.</th>
           <th class="refCol">Ref.</th>
           <th class="cantCol">Cant.</th>
+          <th class="subCol">Subgrup</th>
           <th>Denominació</th>
           <th class="rmCol"></th>
         </tr>
@@ -273,11 +312,11 @@
     <button id="addRowBtn">+ Afegeix fila</button>
     <div class="reviewActions" style="margin-top:16px;">
       <div class="left">
-        <button id="deleteConjuntBtn">Elimina el conjunt</button>
+        <button id="deleteGrupBtn">Elimina el grup</button>
       </div>
       <div class="right">
         <button id="reviewCancelBtn">Cancel·la</button>
-        <button class="primary" id="reviewSaveBtn">Desa el conjunt</button>
+        <button class="primary" id="reviewSaveBtn">Desa el grup</button>
       </div>
     </div>
   </div>
@@ -337,29 +376,37 @@ var els = {
   modalToggle: document.getElementById('modalToggle'),
   modalClose: document.getElementById('modalClose'),
   toast: document.getElementById('toast'),
-  createGroupBtn: document.getElementById('createGroupBtn'),
-  groupsPanel: document.getElementById('groupsPanel'),
-  groupsList: document.getElementById('groupsList'),
+  createConjuntBtn: document.getElementById('createConjuntBtn'),
+  conjuntsPanel: document.getElementById('conjuntsPanel'),
+  conjuntChipsList: document.getElementById('conjuntChipsList'),
   exportCatalogBtn: document.getElementById('exportCatalogBtn'),
   nameModalOverlay: document.getElementById('nameModalOverlay'),
   nameModalLabel: document.getElementById('nameModalLabel'),
   groupNameInput: document.getElementById('groupNameInput'),
   nameModalCancel: document.getElementById('nameModalCancel'),
   nameModalCreate: document.getElementById('nameModalCreate'),
-  groupDetailOverlay: document.getElementById('groupDetailOverlay'),
-  groupDetailNameInput: document.getElementById('groupDetailNameInput'),
-  groupDetailCloseBtn: document.getElementById('groupDetailCloseBtn'),
-  conjuntsList: document.getElementById('conjuntsList'),
-  groupDetailEmpty: document.getElementById('groupDetailEmpty'),
-  addConjuntBtn: document.getElementById('addConjuntBtn'),
-  deleteGroupDetailBtn: document.getElementById('deleteGroupDetailBtn'),
-  groupModalOverlay: document.getElementById('groupModalOverlay'),
+  conjuntDetailOverlay: document.getElementById('conjuntDetailOverlay'),
+  conjuntDetailNameInput: document.getElementById('conjuntDetailNameInput'),
+  conjuntDetailCloseBtn: document.getElementById('conjuntDetailCloseBtn'),
+  grupsList: document.getElementById('grupsList'),
+  conjuntDetailEmpty: document.getElementById('conjuntDetailEmpty'),
+  addGrupBtn: document.getElementById('addGrupBtn'),
+  importMenuBtn: document.getElementById('importMenuBtn'),
+  deleteConjuntBtn: document.getElementById('deleteConjuntBtn'),
+  menuImportOverlay: document.getElementById('menuImportOverlay'),
+  menuImportList: document.getElementById('menuImportList'),
+  menuImportCancel: document.getElementById('menuImportCancel'),
+  menuImportConfirm: document.getElementById('menuImportConfirm'),
+  grupModalOverlay: document.getElementById('grupModalOverlay'),
   reviewNameInput: document.getElementById('reviewNameInput'),
   reviewPagesLabel: document.getElementById('reviewPagesLabel'),
+  reviewPendingPanel: document.getElementById('reviewPendingPanel'),
+  assignPagesBtn: document.getElementById('assignPagesBtn'),
   reviewThumbs: document.getElementById('reviewThumbs'),
+  reviewTable: document.getElementById('reviewTable'),
   reviewTableBody: document.getElementById('reviewTableBody'),
   addRowBtn: document.getElementById('addRowBtn'),
-  deleteConjuntBtn: document.getElementById('deleteConjuntBtn'),
+  deleteGrupBtn: document.getElementById('deleteGrupBtn'),
   reviewCancelBtn: document.getElementById('reviewCancelBtn'),
   reviewSaveBtn: document.getElementById('reviewSaveBtn')
 };
@@ -374,9 +421,10 @@ var state = {
   modalPage: 1,
   renderQueue: [],
   activeRenders: 0,
-  groups: [],
-  currentGroupId: null,
-  editingConjunt: null
+  conjunts: [],
+  currentConjuntId: null,
+  editingGrup: null,
+  pendingMenuImport: null
 };
 
 function showToast(msg, ms){
@@ -410,12 +458,13 @@ els.newFileBtn.addEventListener('click', function(){
 function resetApp(){
   state.pdfDoc = null; state.pdfBytes = null; state.numPages = 0;
   state.selected = new Set(); state.cells = [];
-  state.groups = []; state.editingConjunt = null; state.currentGroupId = null;
+  state.conjunts = []; state.editingGrup = null; state.currentConjuntId = null;
+  state.pendingMenuImport = null;
   els.grid.innerHTML = '';
   els.header.style.display = 'none';
   els.footer.style.display = 'none';
-  els.groupsPanel.style.display = 'none';
-  els.groupsList.innerHTML = '';
+  els.conjuntsPanel.style.display = 'none';
+  els.conjuntChipsList.innerHTML = '';
   els.dropzone.style.display = 'block';
   els.fileInput.value = '';
   setStatus('');
@@ -450,8 +499,8 @@ function loadPdf(bytesForPdfjs){
     els.fileInfo.textContent = state.fileName + '.pdf — ' + state.numPages + ' pàgines';
     setStatus('');
     updateSelCount();
-    state.groups = loadGroupsForFile(state.fileName);
-    renderGroupsPanel();
+    state.conjunts = loadConjuntsForFile(state.fileName);
+    renderConjuntsPanel();
   }).catch(function(err){
     console.error(err);
     setStatus('');
@@ -576,6 +625,7 @@ function updateSelCount(){
   var n = state.selected.size;
   els.selCount.textContent = n + (n===1 ? ' pàgina seleccionada' : ' pàgines seleccionades');
   els.exportBtn.disabled = n === 0;
+  els.createConjuntBtn.disabled = n === 0;
 }
 
 // ---- Toolbar actions ----
@@ -682,23 +732,31 @@ function closeModal(){
   els.modalOverlay.classList.remove('open');
 }
 
-// ---- Groups (spare-parts catalog) ----
-// Data model: a Group is a named container ("Fusor Micron", "Zócalo") holding
-// several Conjunts ("A. Conjunto Depósito", "B. Conjunto Distribuidor"...),
-// each tied to its own drawing page(s) and its own editable rows table.
-var GROUPS_LS_KEY = 'rs_groups_v2';
+// ---- Catalog (spare parts) ----
+// Data model, matching the manual's own terminology:
+//   Conjunt (top)   — a whole equipment/sub-manual, e.g. "Fusor Micron",
+//                      "Cos principal (Anexo 1)". Just a named container.
+//   Grup (leaf)     — one specific drawing, e.g. "A. Conjunto Depósito" or
+//                      "Zócalo". Has pages + an editable rows table. Can
+//                      exist "pending" (no pages yet) when bulk-created from
+//                      a menu page — see extractMenuHeadings().
+//   Subgrup         — NOT a separate container: it's a per-row field, since
+//                      in the source pages GRUPO/SUBGRUPO are two metadata
+//                      fields describing the SAME single drawing (e.g. page
+//                      87: GRUPO=Zócalo, SUBGRUPO="Bancada Dr.").
+var CATALOG_LS_KEY = 'rs_catalog_v3';
 
-function loadAllGroups(){
-  try{ return JSON.parse(localStorage.getItem(GROUPS_LS_KEY) || '{}'); }
+function loadAllCatalogs(){
+  try{ return JSON.parse(localStorage.getItem(CATALOG_LS_KEY) || '{}'); }
   catch(e){ return {}; }
 }
-function loadGroupsForFile(fileName){
-  return loadAllGroups()[fileName] || [];
+function loadConjuntsForFile(fileName){
+  return loadAllCatalogs()[fileName] || [];
 }
-function persistGroups(){
-  var all = loadAllGroups();
-  all[state.fileName] = state.groups;
-  localStorage.setItem(GROUPS_LS_KEY, JSON.stringify(all));
+function persistConjunts(){
+  var all = loadAllCatalogs();
+  all[state.fileName] = state.conjunts;
+  localStorage.setItem(CATALOG_LS_KEY, JSON.stringify(all));
 }
 function uid(){
   return Date.now().toString(36) + Math.random().toString(36).slice(2,8);
@@ -721,12 +779,22 @@ function getPageLines(page){
         if(Math.abs(lines[i].y - y) < 3){ line = lines[i]; break; }
       }
       if(!line){ line = {y:y, items:[]}; lines.push(line); }
-      line.items.push({x:x, str:str});
+      line.items.push({x:x, w:it.width||0, str:str});
     });
     lines.sort(function(a,b){ return b.y - a.y; }); // top-to-bottom (PDF space: y grows upward)
     return lines.map(function(l){
       l.items.sort(function(a,b){ return a.x - b.x; });
-      return l.items.map(function(it){ return it.str; }).join(' ').replace(/\s+/g,' ').trim();
+      // Only insert a space when there's an actual visual gap between text
+      // runs — some fonts in this manual split a single word into several
+      // adjacent runs with ~0 gap (e.g. "ZÓCA"+"LO"), and joining every run
+      // with a literal space would wrongly break those words apart.
+      var text = '', prevEnd = null;
+      l.items.forEach(function(it){
+        if(prevEnd !== null && (it.x - prevEnd) > 1) text += ' ';
+        text += it.str;
+        prevEnd = it.x + it.w;
+      });
+      return text.replace(/\s+/g,' ').trim();
     }).filter(Boolean);
   });
 }
@@ -739,6 +807,50 @@ function extractRowsFromPage(page){
   });
 }
 
+// A page's own "SUBGRUPO <name>" title-block field, when present.
+function extractSubgrupFromPage(page){
+  return getPageLines(page).then(function(lines){
+    lines = lines.filter(function(l){ return !/MANUAL\s+DE\s+INSTRU/i.test(l); });
+    for(var i=0;i<lines.length;i++){
+      var m = lines[i].match(/\bSUBGRUPO\s+(.+)$/i);
+      if(m) return m[1].trim();
+    }
+    return '';
+  }).catch(function(){ return ''; });
+}
+
+// Extracts rows for every page of a Grup and stamps each page's own subgrup
+// (if any) onto its rows.
+function buildRowsForGrup(pages){
+  return Promise.all(pages.map(function(p){
+    return Promise.all([extractRowsFromPage(p), extractSubgrupFromPage(p)]).then(function(res){
+      var rows = res[0], subgrup = res[1];
+      rows.forEach(function(r){ r.subgrup = subgrup; });
+      return rows;
+    });
+  })).then(function(rowsPerPage){
+    return [].concat.apply([], rowsPerPage);
+  });
+}
+
+// Collects every menu-style numbered heading on a page, e.g. a text index
+// page listing "A1.1.- SECCIÓN DEL ZÓCALO...", "A1.2.- SECCIÓN DE LA
+// MESA...", one per line — used to bulk-import several Grup names at once.
+function extractMenuHeadings(page){
+  return getPageLines(page).then(function(lines){
+    lines = lines.filter(function(l){ return !/MANUAL\s+DE\s+INSTRU/i.test(l); });
+    var names = [];
+    lines.forEach(function(l){
+      var m = l.match(/^[A-Z]?\d+(?:\s*\.\s*\d+)*\s*\.\s*-\s*(.+)$/);
+      if(m){
+        var name = m[1].replace(/\s*\.+\s*$/, '').trim();
+        if(name) names.push(name);
+      }
+    });
+    return names;
+  }).catch(function(){ return []; });
+}
+
 // -- Suggest a name from the drawing's own title text: sections copied from
 //    the Meler/Micron sub-manuals have a heading like "A. CONJUNTO DEPÓSITO";
 //    the main machine's drawing sheets have a "GRUPO <name>" / "SUBGRUPO
@@ -747,8 +859,25 @@ function extractRowsFromPage(page){
 function suggestNameFromPages(pages){
   if(!pages.length) return Promise.resolve('');
   return getPageLines(pages[0]).then(function(lines){
+    // Every page repeats a running header like "<chapter> MANUAL DE
+    // INSTRUCCIONES SECCIÓN <n>" — never a useful name, and it can contain
+    // stray "ANEXO n -" text that would otherwise shadow the real title.
+    lines = lines.filter(function(l){ return !/MANUAL\s+DE\s+INSTRU/i.test(l); });
     for(var i=0;i<lines.length;i++){
       if(/^[A-Z]\.?\s*CONJUNTO\s+.+/i.test(lines[i])) return titleCaseEs(lines[i]);
+    }
+    // Section/subsection title pages (a "portada" page before the actual
+    // drawing) use this manual's numbered-heading convention throughout,
+    // e.g. "A1 .1 .- ZÓCALO (ZO) - (BASTIDOR)." or "1.4.3.- SECCIÓN
+    // VIS-SIN-FIN (VSF).". Some headings have stray spaces around the dots
+    // (a font-kerning quirk in the source PDF), hence the \s* tolerance.
+    for(var i=0;i<lines.length;i++){
+      var mh = lines[i].match(/^[A-Z]?\d+(?:\s*\.\s*\d+)*\s*\.\s*-\s*(.+)$/);
+      if(mh) return mh[1].replace(/\s*\.+\s*$/, '').trim();
+    }
+    for(var i=0;i<lines.length;i++){
+      var mAnexo = lines[i].match(/^ANEXO\s+\d+\s*[:.\-]\s*(.+)$/i);
+      if(mAnexo) return titleCaseEs(mAnexo[1].replace(/\s*\.+\s*$/, '').trim());
     }
     for(var i=0;i<lines.length;i++){
       var m = lines[i].match(/\bGRUPO\s+(.+)$/i);
@@ -785,20 +914,25 @@ function parseLineToRow(text, page){
       denomParts = denomParts.slice(0, -1);
     }
   }
-  return {pos:pos, ref:ref, cant:cant, denominacio:denomParts.join(' '), page:page};
+  return {pos:pos, ref:ref, cant:cant, subgrup:'', denominacio:denomParts.join(' '), page:page};
 }
 
-// -- Name modal: shared by "create a Group" and "add a Conjunt to a Group" --
-var pendingNameAction = null; // 'group' | 'conjunt'
-var pendingGroupId = null;
+// -- Name modal: shared by "create a Conjunt" and "add a Grup to a Conjunt" --
+var pendingNameAction = null; // 'newconjunt' | 'grup'
+var pendingConjuntId = null;
 var pendingPages = null;
 
-els.createGroupBtn.addEventListener('click', function(){
-  pendingNameAction = 'group';
-  pendingGroupId = null;
-  pendingPages = null;
-  var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
-  openNameModalWithSuggestion('Nom del grup', pages, els.createGroupBtn);
+// "Crea un conjunt" creates the Conjunt and its first Grup together in one
+// step — the name asked for (and imported from the title page) is the
+// Grup's name, since that's the meaningful unit tied to a drawing. The
+// Conjunt starts out with the same name and can be renamed later from its
+// detail view.
+els.createConjuntBtn.addEventListener('click', function(){
+  if(state.selected.size === 0) return;
+  pendingNameAction = 'newconjunt';
+  pendingConjuntId = null;
+  pendingPages = Array.from(state.selected).sort(function(a,b){ return a-b; });
+  openNameModalWithSuggestion('Nom del grup', pendingPages, els.createConjuntBtn);
 });
 
 // Resolves the suggested name BEFORE showing the modal, so the field is
@@ -821,12 +955,12 @@ els.nameModalOverlay.addEventListener('click', function(e){
 });
 function closeNameModal(){
   els.nameModalOverlay.classList.remove('open');
-  pendingNameAction = null; pendingGroupId = null; pendingPages = null;
+  pendingNameAction = null; pendingConjuntId = null; pendingPages = null;
 }
 function cancelNameModal(){
-  var action = pendingNameAction, groupId = pendingGroupId;
+  var action = pendingNameAction, conjuntId = pendingConjuntId;
   closeNameModal();
-  if(action === 'conjunt' && groupId) openGroupDetail(groupId);
+  if(action === 'grup' && conjuntId) openConjuntDetail(conjuntId);
 }
 els.groupNameInput.addEventListener('keydown', function(e){
   if(e.key === 'Enter') els.nameModalCreate.click();
@@ -834,191 +968,299 @@ els.groupNameInput.addEventListener('keydown', function(e){
 els.nameModalCreate.addEventListener('click', function(){
   var name = els.groupNameInput.value.trim();
   if(!name){ showToast('Posa un nom.'); return; }
-  var action = pendingNameAction, groupId = pendingGroupId, pages = pendingPages;
+  var action = pendingNameAction, conjuntId = pendingConjuntId, pages = pendingPages;
   els.nameModalOverlay.classList.remove('open');
-  pendingNameAction = null; pendingGroupId = null; pendingPages = null;
-  if(action === 'group') createGroup(name);
-  else if(action === 'conjunt') addConjuntToGroup(groupId, name, pages);
+  pendingNameAction = null; pendingConjuntId = null; pendingPages = null;
+  if(action === 'newconjunt') createConjuntWithGrup(name, pages);
+  else if(action === 'grup') addGrupToConjunt(conjuntId, name, pages, false);
 });
 
-function createGroup(name){
-  var group = {id: uid(), name: name, conjunts: []};
-  state.groups.push(group);
-  persistGroups();
-  renderGroupsPanel();
-  openGroupDetail(group.id);
+function createConjuntWithGrup(name, pages){
+  var conjunt = {id: uid(), name: name, grups: []};
+  state.conjunts.push(conjunt);
+  addGrupToConjunt(conjunt.id, name, pages, true);
 }
 
-function deleteGroup(id){
-  state.groups = state.groups.filter(function(g){ return g.id !== id; });
-  persistGroups();
-  renderGroupsPanel();
+function deleteConjunt(id){
+  state.conjunts = state.conjunts.filter(function(c){ return c.id !== id; });
+  persistConjunts();
+  renderConjuntsPanel();
 }
 
-// -- Groups panel --
-function renderGroupsPanel(){
-  els.groupsPanel.style.display = state.groups.length ? 'block' : 'none';
-  els.groupsList.innerHTML = '';
-  state.groups.forEach(function(g){
+// -- Conjunts panel (top level) --
+function renderConjuntsPanel(){
+  els.conjuntsPanel.style.display = state.conjunts.length ? 'block' : 'none';
+  els.conjuntChipsList.innerHTML = '';
+  state.conjunts.forEach(function(c){
     var chip = document.createElement('div');
-    chip.className = 'groupChip';
+    chip.className = 'conjuntChip';
     var nameEl = document.createElement('div');
     nameEl.className = 'gName';
-    nameEl.textContent = g.name;
-    var rowCount = g.conjunts.reduce(function(sum,c){ return sum + c.rows.length; }, 0);
+    nameEl.textContent = c.name;
+    var rowCount = c.grups.reduce(function(sum,g){ return sum + g.rows.length; }, 0);
     var metaEl = document.createElement('div');
     metaEl.className = 'gMeta';
-    metaEl.textContent = g.conjunts.length + (g.conjunts.length===1?' conjunt · ':' conjunts · ') +
+    metaEl.textContent = c.grups.length + (c.grups.length===1?' grup · ':' grups · ') +
       rowCount + (rowCount===1?' fila':' files');
     var delBtn = document.createElement('button');
     delBtn.className = 'gDel';
     delBtn.textContent = '✕';
     delBtn.addEventListener('click', function(e){
       e.stopPropagation();
-      deleteGroup(g.id);
+      deleteConjunt(c.id);
     });
     chip.appendChild(nameEl);
     chip.appendChild(metaEl);
     chip.appendChild(delBtn);
-    chip.addEventListener('click', function(){ openGroupDetail(g.id); });
-    els.groupsList.appendChild(chip);
+    chip.addEventListener('click', function(){ openConjuntDetail(c.id); });
+    els.conjuntChipsList.appendChild(chip);
   });
 }
 
-// -- Group detail modal: lists the group's conjunts, lets you add a new one
-//    from the pages currently checked in the main grid --
-function openGroupDetail(groupId){
-  var g = state.groups.find(function(x){ return x.id === groupId; });
-  if(!g) return;
-  state.currentGroupId = groupId;
-  els.groupDetailNameInput.value = g.name;
-  renderConjuntsList(g);
-  els.groupDetailOverlay.classList.add('open');
+// -- Conjunt detail modal: lists the conjunt's grups, lets you add a new one
+//    from the pages currently checked in the main grid, or bulk-import
+//    several from a menu/index page --
+function openConjuntDetail(conjuntId){
+  var c = state.conjunts.find(function(x){ return x.id === conjuntId; });
+  if(!c) return;
+  state.currentConjuntId = conjuntId;
+  els.conjuntDetailNameInput.value = c.name;
+  renderGrupsList(c);
+  els.conjuntDetailOverlay.classList.add('open');
 }
-function closeGroupDetail(){
-  els.groupDetailOverlay.classList.remove('open');
-  state.currentGroupId = null;
+function closeConjuntDetail(){
+  els.conjuntDetailOverlay.classList.remove('open');
+  state.currentConjuntId = null;
 }
-function renderConjuntsList(g){
-  els.conjuntsList.innerHTML = '';
-  els.groupDetailEmpty.style.display = g.conjunts.length ? 'none' : 'block';
+function renderGrupsList(c){
+  els.grupsList.innerHTML = '';
+  els.conjuntDetailEmpty.style.display = c.grups.length ? 'none' : 'block';
   var n = state.selected.size;
-  els.addConjuntBtn.textContent = n
-    ? '+ Afegeix un conjunt amb la selecció actual (' + n + (n===1?' pàgina)':' pàgines)')
-    : '+ Afegeix un conjunt (selecciona pàgines a la graella primer)';
-  els.addConjuntBtn.disabled = n === 0;
-  g.conjunts.forEach(function(c){
+  els.addGrupBtn.textContent = n
+    ? '+ Afegeix un grup amb la selecció actual (' + n + (n===1?' pàgina)':' pàgines)')
+    : '+ Afegeix un grup (selecciona pàgines a la graella primer)';
+  els.addGrupBtn.disabled = n === 0;
+  els.importMenuBtn.disabled = n !== 1;
+  c.grups.forEach(function(g){
     var row = document.createElement('div');
-    row.className = 'conjuntRow';
+    row.className = 'grupRow' + (g.pages.length ? '' : ' pending');
     var info = document.createElement('div');
     info.className = 'cInfo';
     var nameEl = document.createElement('span');
     nameEl.className = 'cName';
-    nameEl.textContent = c.name;
+    nameEl.textContent = g.name;
     var metaEl = document.createElement('span');
     metaEl.className = 'cMeta';
-    metaEl.textContent = 'Pàg. ' + c.pages.join(', ') + ' · ' + c.rows.length + (c.rows.length===1?' fila':' files');
+    metaEl.textContent = g.pages.length
+      ? ('Pàg. ' + g.pages.join(', ') + ' · ' + g.rows.length + (g.rows.length===1?' fila':' files'))
+      : 'Pendent d\'assignar pàgines';
     info.appendChild(nameEl); info.appendChild(metaEl);
     var delBtn = document.createElement('button');
     delBtn.className = 'cDel';
     delBtn.textContent = '✕';
     delBtn.addEventListener('click', function(e){
       e.stopPropagation();
-      deleteConjunt(g.id, c.id);
+      deleteGrup(c.id, g.id);
     });
     row.appendChild(info);
     row.appendChild(delBtn);
-    row.addEventListener('click', function(){ openConjuntReview(g.id, c.id, false); });
-    els.conjuntsList.appendChild(row);
+    row.addEventListener('click', function(){ openGrupReview(c.id, g.id, false); });
+    els.grupsList.appendChild(row);
   });
 }
-els.groupDetailCloseBtn.addEventListener('click', closeGroupDetail);
-els.groupDetailOverlay.addEventListener('click', function(e){
-  if(e.target === els.groupDetailOverlay) closeGroupDetail();
+els.conjuntDetailCloseBtn.addEventListener('click', closeConjuntDetail);
+els.conjuntDetailOverlay.addEventListener('click', function(e){
+  if(e.target === els.conjuntDetailOverlay) closeConjuntDetail();
 });
-els.groupDetailNameInput.addEventListener('input', function(){
-  var g = state.groups.find(function(x){ return x.id === state.currentGroupId; });
-  if(g) g.name = els.groupDetailNameInput.value;
+els.conjuntDetailNameInput.addEventListener('input', function(){
+  var c = state.conjunts.find(function(x){ return x.id === state.currentConjuntId; });
+  if(c) c.name = els.conjuntDetailNameInput.value;
 });
-els.groupDetailNameInput.addEventListener('blur', function(){
-  var name = els.groupDetailNameInput.value.trim();
-  if(!name){ showToast('Posa un nom al grup.'); return; }
-  persistGroups();
-  renderGroupsPanel();
+els.conjuntDetailNameInput.addEventListener('blur', function(){
+  var name = els.conjuntDetailNameInput.value.trim();
+  if(!name){ showToast('Posa un nom al conjunt.'); return; }
+  persistConjunts();
+  renderConjuntsPanel();
 });
-els.deleteGroupDetailBtn.addEventListener('click', function(){
-  var groupId = state.currentGroupId;
-  closeGroupDetail();
-  deleteGroup(groupId);
+els.deleteConjuntBtn.addEventListener('click', function(){
+  var conjuntId = state.currentConjuntId;
+  closeConjuntDetail();
+  deleteConjunt(conjuntId);
 });
-els.addConjuntBtn.addEventListener('click', function(){
+els.addGrupBtn.addEventListener('click', function(){
   if(state.selected.size === 0) return;
-  pendingNameAction = 'conjunt';
-  pendingGroupId = state.currentGroupId;
+  pendingNameAction = 'grup';
+  pendingConjuntId = state.currentConjuntId;
   pendingPages = Array.from(state.selected).sort(function(a,b){ return a-b; });
-  els.groupDetailOverlay.classList.remove('open'); // avoid stacking two overlays
-  openNameModalWithSuggestion('Nom del conjunt', pendingPages, els.addConjuntBtn);
+  els.conjuntDetailOverlay.classList.remove('open'); // avoid stacking two overlays
+  openNameModalWithSuggestion('Nom del grup', pendingPages, els.addGrupBtn);
 });
 
-function addConjuntToGroup(groupId, name, pages){
-  var g = state.groups.find(function(x){ return x.id === groupId; });
-  if(!g) return;
+function addGrupToConjunt(conjuntId, name, pages, isNewConjunt){
+  var c = state.conjunts.find(function(x){ return x.id === conjuntId; });
+  if(!c) return;
   setStatus('Extraient text de ' + pages.length + ' pàgines…');
-  Promise.all(pages.map(extractRowsFromPage)).then(function(rowsPerPage){
-    var rows = [].concat.apply([], rowsPerPage);
-    var conjunt = {id: uid(), name: name, pages: pages, rows: rows};
-    g.conjunts.push(conjunt);
-    persistGroups();
-    renderGroupsPanel();
+  buildRowsForGrup(pages).then(function(rows){
+    var grup = {id: uid(), name: name, pages: pages, rows: rows};
+    c.grups.push(grup);
+    persistConjunts();
+    renderConjuntsPanel();
     setStatus('');
-    openConjuntReview(groupId, conjunt.id, true);
+    openGrupReview(conjuntId, grup.id, true, !!isNewConjunt);
   }).catch(function(err){
     console.error(err);
     setStatus('');
     showToast('Error extraient el text: ' + err.message, 4000);
+    if(isNewConjunt) deleteConjunt(conjuntId);
   });
 }
 
-function deleteConjunt(groupId, conjuntId){
-  var g = state.groups.find(function(x){ return x.id === groupId; });
-  if(!g) return;
-  g.conjunts = g.conjunts.filter(function(c){ return c.id !== conjuntId; });
-  persistGroups();
-  renderGroupsPanel();
-  if(els.groupDetailOverlay.classList.contains('open') && state.currentGroupId === groupId){
-    renderConjuntsList(g);
+function deleteGrup(conjuntId, grupId){
+  var c = state.conjunts.find(function(x){ return x.id === conjuntId; });
+  if(!c) return;
+  c.grups = c.grups.filter(function(g){ return g.id !== grupId; });
+  persistConjunts();
+  renderConjuntsPanel();
+  if(els.conjuntDetailOverlay.classList.contains('open') && state.currentConjuntId === conjuntId){
+    renderGrupsList(c);
   }
 }
 
-// -- Conjunt review modal (pages + editable rows table) --
-function openConjuntReview(groupId, conjuntId, isNew){
-  var g = state.groups.find(function(x){ return x.id === groupId; });
-  var c = g && g.conjunts.find(function(x){ return x.id === conjuntId; });
-  if(!c) return;
-  state.editingConjunt = {
-    groupId: groupId,
-    id: c.id,
-    isNew: !!isNew,
-    rows: c.rows.map(function(r){
-      return {pos:r.pos, ref:r.ref, cant:r.cant, denominacio:r.denominacio, page:r.page};
-    }),
-    pages: c.pages.slice()
-  };
-  els.reviewNameInput.value = c.name;
-  els.reviewPagesLabel.textContent = 'Pàgines: ' + c.pages.join(', ');
-  els.reviewThumbs.innerHTML = '';
-  c.pages.forEach(function(p){
-    var cv = document.createElement('canvas');
-    els.reviewThumbs.appendChild(cv);
-    renderPageToCanvas(p, cv, 260).catch(function(err){ console.warn('preview render', p, err); });
+// -- Import several Grups at once from a menu/index page --
+els.importMenuBtn.addEventListener('click', function(){
+  if(state.selected.size !== 1) return;
+  var page = Array.from(state.selected)[0];
+  var conjuntId = state.currentConjuntId;
+  setStatus('Llegint la pàgina de menú…');
+  extractMenuHeadings(page).then(function(names){
+    setStatus('');
+    if(!names.length){
+      showToast('No s\'han trobat entrades de menú en aquesta pàgina.', 4000);
+      return;
+    }
+    openMenuImportModal(conjuntId, names);
+  }).catch(function(err){
+    setStatus('');
+    showToast('Error llegint la pàgina: ' + err.message, 4000);
   });
-  renderReviewTable();
-  els.groupDetailOverlay.classList.remove('open');
-  els.groupModalOverlay.classList.add('open');
+});
+
+function openMenuImportModal(conjuntId, names){
+  state.pendingMenuImport = {conjuntId: conjuntId, names: names};
+  els.menuImportList.innerHTML = '';
+  names.forEach(function(name, idx){
+    var row = document.createElement('label');
+    row.className = 'menuImportRow';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = true; cb.dataset.idx = idx;
+    var span = document.createElement('span');
+    span.textContent = name;
+    row.appendChild(cb); row.appendChild(span);
+    els.menuImportList.appendChild(row);
+  });
+  els.conjuntDetailOverlay.classList.remove('open');
+  els.menuImportOverlay.classList.add('open');
+}
+els.menuImportCancel.addEventListener('click', cancelMenuImport);
+els.menuImportOverlay.addEventListener('click', function(e){
+  if(e.target === els.menuImportOverlay) cancelMenuImport();
+});
+function cancelMenuImport(){
+  var conjuntId = state.pendingMenuImport && state.pendingMenuImport.conjuntId;
+  els.menuImportOverlay.classList.remove('open');
+  state.pendingMenuImport = null;
+  if(conjuntId) openConjuntDetail(conjuntId);
+}
+els.menuImportConfirm.addEventListener('click', function(){
+  var pending = state.pendingMenuImport;
+  if(!pending) return;
+  var c = state.conjunts.find(function(x){ return x.id === pending.conjuntId; });
+  els.menuImportOverlay.classList.remove('open');
+  state.pendingMenuImport = null;
+  if(!c) return;
+  var checks = els.menuImportList.querySelectorAll('input[type=checkbox]');
+  var added = 0;
+  checks.forEach(function(cb){
+    if(cb.checked){
+      c.grups.push({id: uid(), name: pending.names[parseInt(cb.dataset.idx,10)], pages: [], rows: []});
+      added++;
+    }
+  });
+  persistConjunts();
+  renderConjuntsPanel();
+  openConjuntDetail(c.id);
+  showToast(added + (added===1?' grup importat.':' grups importats.'));
+});
+
+// -- Grup review modal: pages + editable rows table, or (when created empty
+//    from a menu import) a prompt to assign pages first --
+function openGrupReview(conjuntId, grupId, isNew, isNewConjunt){
+  var c = state.conjunts.find(function(x){ return x.id === conjuntId; });
+  var g = c && c.grups.find(function(x){ return x.id === grupId; });
+  if(!g) return;
+  state.editingGrup = {
+    conjuntId: conjuntId,
+    id: g.id,
+    isNew: !!isNew,
+    isNewConjunt: !!isNewConjunt,
+    rows: g.rows.map(function(r){
+      return {pos:r.pos, ref:r.ref, cant:r.cant, subgrup:r.subgrup, denominacio:r.denominacio, page:r.page};
+    }),
+    pages: g.pages.slice()
+  };
+  els.reviewNameInput.value = g.name;
+  renderGrupReviewBody();
+  els.conjuntDetailOverlay.classList.remove('open');
+  els.grupModalOverlay.classList.add('open');
 }
 
+function renderGrupReviewBody(){
+  var eg = state.editingGrup;
+  if(eg.pages.length === 0){
+    els.reviewPendingPanel.style.display = 'block';
+    els.reviewThumbs.style.display = 'none';
+    els.reviewTable.style.display = 'none';
+    els.addRowBtn.style.display = 'none';
+    els.reviewPagesLabel.textContent = '';
+    var n = state.selected.size;
+    els.assignPagesBtn.textContent = n
+      ? 'Assigna la selecció actual (' + n + (n===1?' pàgina)':' pàgines)')
+      : 'Selecciona pàgines a la graella primer';
+    els.assignPagesBtn.disabled = n === 0;
+  } else {
+    els.reviewPendingPanel.style.display = 'none';
+    els.reviewThumbs.style.display = 'flex';
+    els.reviewTable.style.display = 'table';
+    els.addRowBtn.style.display = '';
+    els.reviewPagesLabel.textContent = 'Pàgines: ' + eg.pages.join(', ');
+    els.reviewThumbs.innerHTML = '';
+    eg.pages.forEach(function(p){
+      var cv = document.createElement('canvas');
+      els.reviewThumbs.appendChild(cv);
+      renderPageToCanvas(p, cv, 260).catch(function(err){ console.warn('preview render', p, err); });
+    });
+    renderReviewTable();
+  }
+}
+
+els.assignPagesBtn.addEventListener('click', function(){
+  var eg = state.editingGrup;
+  if(!eg || state.selected.size === 0) return;
+  var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
+  els.assignPagesBtn.disabled = true;
+  els.assignPagesBtn.textContent = 'Extraient text…';
+  buildRowsForGrup(pages).then(function(rows){
+    eg.pages = pages;
+    eg.rows = rows;
+    renderGrupReviewBody();
+  }).catch(function(err){
+    showToast('Error extraient el text: ' + err.message, 4000);
+    els.assignPagesBtn.disabled = false;
+  });
+});
+
 function renderReviewTable(){
-  var rows = state.editingConjunt.rows;
+  var rows = state.editingGrup.rows;
   els.reviewTableBody.innerHTML = '';
   rows.forEach(function(row, idx){
     var tr = document.createElement('tr');
@@ -1038,6 +1280,11 @@ function renderReviewTable(){
     inCant.addEventListener('input', function(){ row.cant = inCant.value; });
     tdCant.appendChild(inCant); tr.appendChild(tdCant);
 
+    var tdSub = document.createElement('td'); tdSub.className = 'subCol';
+    var inSub = document.createElement('input'); inSub.type = 'text'; inSub.value = row.subgrup || '';
+    inSub.addEventListener('input', function(){ row.subgrup = inSub.value; });
+    tdSub.appendChild(inSub); tr.appendChild(tdSub);
+
     var tdDen = document.createElement('td');
     var inDen = document.createElement('input'); inDen.type = 'text'; inDen.value = row.denominacio;
     inDen.addEventListener('input', function(){ row.denominacio = inDen.value; });
@@ -1046,7 +1293,7 @@ function renderReviewTable(){
     var tdRm = document.createElement('td'); tdRm.className = 'rmCol';
     var rmBtn = document.createElement('button'); rmBtn.className = 'rmRowBtn'; rmBtn.textContent = '✕';
     rmBtn.addEventListener('click', function(){
-      state.editingConjunt.rows.splice(idx, 1);
+      state.editingGrup.rows.splice(idx, 1);
       renderReviewTable();
     });
     tdRm.appendChild(rmBtn); tr.appendChild(tdRm);
@@ -1056,71 +1303,79 @@ function renderReviewTable(){
 }
 
 els.addRowBtn.addEventListener('click', function(){
-  state.editingConjunt.rows.push({pos:'', ref:'', cant:'', denominacio:'', page: state.editingConjunt.pages[0]});
+  state.editingGrup.rows.push({pos:'', ref:'', cant:'', subgrup:'', denominacio:'', page: state.editingGrup.pages[0]});
   renderReviewTable();
 });
 
 els.reviewCancelBtn.addEventListener('click', function(){
-  var ec = state.editingConjunt;
-  if(!ec) return;
-  var wasNew = ec.isNew, groupId = ec.groupId, id = ec.id;
-  closeConjuntReview();
-  if(wasNew) deleteConjunt(groupId, id);
-  openGroupDetail(groupId);
+  var eg = state.editingGrup;
+  if(!eg) return;
+  var wasNew = eg.isNew, conjuntId = eg.conjuntId, id = eg.id, wasNewConjunt = eg.isNewConjunt;
+  closeGrupReview();
+  if(wasNew && wasNewConjunt){
+    // The Conjunt and this Grup were created together as one action —
+    // cancelling discards both instead of leaving an empty conjunt behind.
+    deleteConjunt(conjuntId);
+    return;
+  }
+  if(wasNew) deleteGrup(conjuntId, id);
+  openConjuntDetail(conjuntId);
 });
-els.groupModalOverlay.addEventListener('click', function(e){
-  if(e.target === els.groupModalOverlay) els.reviewCancelBtn.click();
+els.grupModalOverlay.addEventListener('click', function(e){
+  if(e.target === els.grupModalOverlay) els.reviewCancelBtn.click();
 });
 document.addEventListener('keydown', function(e){
   if(e.key !== 'Escape') return;
   if(els.nameModalOverlay.classList.contains('open')){ cancelNameModal(); return; }
-  if(els.groupModalOverlay.classList.contains('open')){ els.reviewCancelBtn.click(); return; }
-  if(els.groupDetailOverlay.classList.contains('open')){ closeGroupDetail(); return; }
+  if(els.menuImportOverlay.classList.contains('open')){ cancelMenuImport(); return; }
+  if(els.grupModalOverlay.classList.contains('open')){ els.reviewCancelBtn.click(); return; }
+  if(els.conjuntDetailOverlay.classList.contains('open')){ closeConjuntDetail(); return; }
 });
 
 els.reviewSaveBtn.addEventListener('click', function(){
-  var ec = state.editingConjunt;
-  if(!ec) return;
+  var eg = state.editingGrup;
+  if(!eg) return;
   var name = els.reviewNameInput.value.trim();
-  if(!name){ showToast('Posa un nom al conjunt.'); return; }
-  var g = state.groups.find(function(x){ return x.id === ec.groupId; });
-  var c = g && g.conjunts.find(function(x){ return x.id === ec.id; });
-  if(c){
-    c.name = name;
-    c.rows = ec.rows;
+  if(!name){ showToast('Posa un nom al grup.'); return; }
+  var c = state.conjunts.find(function(x){ return x.id === eg.conjuntId; });
+  var g = c && c.grups.find(function(x){ return x.id === eg.id; });
+  if(g){
+    g.name = name;
+    g.pages = eg.pages;
+    g.rows = eg.rows;
   }
-  persistGroups();
-  renderGroupsPanel();
-  var groupId = ec.groupId;
-  closeConjuntReview();
-  openGroupDetail(groupId);
+  persistConjunts();
+  renderConjuntsPanel();
+  var conjuntId = eg.conjuntId;
+  closeGrupReview();
+  openConjuntDetail(conjuntId);
 });
 
-els.deleteConjuntBtn.addEventListener('click', function(){
-  var ec = state.editingConjunt;
-  if(!ec) return;
-  var groupId = ec.groupId, id = ec.id;
-  closeConjuntReview();
-  deleteConjunt(groupId, id);
-  openGroupDetail(groupId);
+els.deleteGrupBtn.addEventListener('click', function(){
+  var eg = state.editingGrup;
+  if(!eg) return;
+  var conjuntId = eg.conjuntId, id = eg.id;
+  closeGrupReview();
+  deleteGrup(conjuntId, id);
+  openConjuntDetail(conjuntId);
 });
 
-function closeConjuntReview(){
-  els.groupModalOverlay.classList.remove('open');
-  state.editingConjunt = null;
+function closeGrupReview(){
+  els.grupModalOverlay.classList.remove('open');
+  state.editingGrup = null;
 }
 
 // -- Export catalog JSON --
 els.exportCatalogBtn.addEventListener('click', function(){
-  if(!state.groups.length){ showToast('No hi ha cap grup creat.'); return; }
+  if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
   var payload = {
     sourceFile: state.fileName + '.pdf',
     exportedAt: new Date().toISOString(),
-    groups: state.groups.map(function(g){
+    conjunts: state.conjunts.map(function(c){
       return {
-        name: g.name,
-        conjunts: g.conjunts.map(function(c){
-          return {name:c.name, pages:c.pages, rows:c.rows};
+        name: c.name,
+        grups: c.grups.map(function(g){
+          return {name:g.name, pages:g.pages, rows:g.rows};
         })
       };
     })
