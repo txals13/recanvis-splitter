@@ -139,7 +139,7 @@
   #nameModalCard input[type=text]{width:280px; margin-bottom:14px;}
   #nameModalCard .actions{display:flex; justify-content:flex-end; gap:8px;}
 
-  .reviewCard{width:min(900px,92vw); max-height:88vh; overflow:auto;}
+  .reviewCard{width:min(1100px,94vw); max-height:88vh; overflow:auto;}
   .reviewTop{display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;}
   .reviewTop input[type=text]{width:260px;}
   .reviewThumbs{display:flex; gap:8px; overflow-x:auto; margin-bottom:16px; padding-bottom:4px;}
@@ -151,7 +151,9 @@
   table.rowsTable td.posCol input{width:60px;}
   table.rowsTable td.cantCol input{width:60px;}
   table.rowsTable td.refCol input{width:120px;}
-  table.rowsTable td.subCol input{width:110px;}
+  table.rowsTable td.grupCol input{width:100px;}
+  table.rowsTable td.subCol input{width:100px;}
+  table.rowsTable td.subNumCol input{width:100px;}
   table.rowsTable td.rmCol{width:30px;}
   .rmRowBtn{width:26px; height:26px; padding:0; color:var(--danger); border-color:var(--border);}
   .reviewActions{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
@@ -302,7 +304,9 @@
           <th class="posCol">Pos.</th>
           <th class="refCol">Ref.</th>
           <th class="cantCol">Cant.</th>
+          <th class="grupCol">Grup</th>
           <th class="subCol">Subgrup</th>
+          <th class="subNumCol">Num.</th>
           <th>Denominació</th>
           <th class="rmCol"></th>
         </tr>
@@ -819,13 +823,35 @@ function extractSubgrupFromPage(page){
   }).catch(function(){ return ''; });
 }
 
-// Extracts rows for every page of a Grup and stamps each page's own subgrup
-// (if any) onto its rows.
-function buildRowsForGrup(pages){
+// The drawing's own reference code from the title block "Nº" field, e.g.
+// "4726-01-00". In the reconstructed text this value ends up on the same
+// line as the DIN paper-size code right before it (e.g. "A-4 4726-01-00"),
+// so anchoring on that prefix avoids matching a part's own reference code
+// elsewhere on the page (individual parts can have similarly-shaped codes
+// like "4726-01-01").
+function extractSubgrupNumFromPage(page){
+  return getPageLines(page).then(function(lines){
+    for(var i=0;i<lines.length;i++){
+      var m = lines[i].match(/[A-Z]-\d+\s+(\d{4}-\d{2}-\d{2})/);
+      if(m) return m[1];
+    }
+    return '';
+  }).catch(function(){ return ''; });
+}
+
+// Extracts rows for every page of a Grup and stamps the Grup's name plus
+// each page's own subgrup name/number (if any) onto its rows.
+function buildRowsForGrup(pages, grupName){
   return Promise.all(pages.map(function(p){
-    return Promise.all([extractRowsFromPage(p), extractSubgrupFromPage(p)]).then(function(res){
-      var rows = res[0], subgrup = res[1];
-      rows.forEach(function(r){ r.subgrup = subgrup; });
+    return Promise.all([
+      extractRowsFromPage(p), extractSubgrupFromPage(p), extractSubgrupNumFromPage(p)
+    ]).then(function(res){
+      var rows = res[0], subgrup = res[1], subgrupNum = res[2];
+      rows.forEach(function(r){
+        r.grup = grupName || '';
+        r.subgrup = subgrup;
+        r.subgrupNum = subgrupNum;
+      });
       return rows;
     });
   })).then(function(rowsPerPage){
@@ -914,7 +940,7 @@ function parseLineToRow(text, page){
       denomParts = denomParts.slice(0, -1);
     }
   }
-  return {pos:pos, ref:ref, cant:cant, subgrup:'', denominacio:denomParts.join(' '), page:page};
+  return {pos:pos, ref:ref, cant:cant, grup:'', subgrup:'', subgrupNum:'', denominacio:denomParts.join(' '), page:page};
 }
 
 // -- Name modal: shared by "create a Conjunt" and "add a Grup to a Conjunt" --
@@ -1100,7 +1126,7 @@ function addGrupToConjunt(conjuntId, name, pages, isNewConjunt){
   var c = state.conjunts.find(function(x){ return x.id === conjuntId; });
   if(!c) return;
   setStatus('Extraient text de ' + pages.length + ' pàgines…');
-  buildRowsForGrup(pages).then(function(rows){
+  buildRowsForGrup(pages, name).then(function(rows){
     var grup = {id: uid(), name: name, pages: pages, rows: rows};
     c.grups.push(grup);
     persistConjunts();
@@ -1204,7 +1230,7 @@ function openGrupReview(conjuntId, grupId, isNew, isNewConjunt){
     isNew: !!isNew,
     isNewConjunt: !!isNewConjunt,
     rows: g.rows.map(function(r){
-      return {pos:r.pos, ref:r.ref, cant:r.cant, subgrup:r.subgrup, denominacio:r.denominacio, page:r.page};
+      return {pos:r.pos, ref:r.ref, cant:r.cant, grup:r.grup, subgrup:r.subgrup, subgrupNum:r.subgrupNum, denominacio:r.denominacio, page:r.page};
     }),
     pages: g.pages.slice()
   };
@@ -1249,7 +1275,7 @@ els.assignPagesBtn.addEventListener('click', function(){
   var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
   els.assignPagesBtn.disabled = true;
   els.assignPagesBtn.textContent = 'Extraient text…';
-  buildRowsForGrup(pages).then(function(rows){
+  buildRowsForGrup(pages, els.reviewNameInput.value.trim()).then(function(rows){
     eg.pages = pages;
     eg.rows = rows;
     renderGrupReviewBody();
@@ -1280,10 +1306,20 @@ function renderReviewTable(){
     inCant.addEventListener('input', function(){ row.cant = inCant.value; });
     tdCant.appendChild(inCant); tr.appendChild(tdCant);
 
+    var tdGrup = document.createElement('td'); tdGrup.className = 'grupCol';
+    var inGrup = document.createElement('input'); inGrup.type = 'text'; inGrup.value = row.grup || '';
+    inGrup.addEventListener('input', function(){ row.grup = inGrup.value; });
+    tdGrup.appendChild(inGrup); tr.appendChild(tdGrup);
+
     var tdSub = document.createElement('td'); tdSub.className = 'subCol';
     var inSub = document.createElement('input'); inSub.type = 'text'; inSub.value = row.subgrup || '';
     inSub.addEventListener('input', function(){ row.subgrup = inSub.value; });
     tdSub.appendChild(inSub); tr.appendChild(tdSub);
+
+    var tdSubNum = document.createElement('td'); tdSubNum.className = 'subNumCol';
+    var inSubNum = document.createElement('input'); inSubNum.type = 'text'; inSubNum.value = row.subgrupNum || '';
+    inSubNum.addEventListener('input', function(){ row.subgrupNum = inSubNum.value; });
+    tdSubNum.appendChild(inSubNum); tr.appendChild(tdSubNum);
 
     var tdDen = document.createElement('td');
     var inDen = document.createElement('input'); inDen.type = 'text'; inDen.value = row.denominacio;
@@ -1303,7 +1339,12 @@ function renderReviewTable(){
 }
 
 els.addRowBtn.addEventListener('click', function(){
-  state.editingGrup.rows.push({pos:'', ref:'', cant:'', subgrup:'', denominacio:'', page: state.editingGrup.pages[0]});
+  var rows = state.editingGrup.rows;
+  var defaultGrup = rows.length ? rows[0].grup : els.reviewNameInput.value.trim();
+  rows.push({
+    pos:'', ref:'', cant:'', grup: defaultGrup || '', subgrup:'', subgrupNum:'',
+    denominacio:'', page: state.editingGrup.pages[0]
+  });
   renderReviewTable();
 });
 
