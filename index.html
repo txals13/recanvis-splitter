@@ -227,6 +227,8 @@
   <input type="text" id="machClient" placeholder="Client">
   <span id="portadaInfo">Portada: —</span>
   <button id="portadaClearBtn" style="display:none;">Treu portada</button>
+  <button id="importJsonBtn" title="Importa un conjunt d'un fitxer JSON exportat">⬆ Importa (JSON)</button>
+  <input type="file" id="importJsonInput" accept="application/json,.json" style="display:none;">
 </div>
 
 <div id="conjuntsPanel">
@@ -404,6 +406,8 @@ var els = {
   machClient: document.getElementById('machClient'),
   portadaInfo: document.getElementById('portadaInfo'),
   portadaClearBtn: document.getElementById('portadaClearBtn'),
+  importJsonBtn: document.getElementById('importJsonBtn'),
+  importJsonInput: document.getElementById('importJsonInput'),
   modalPortadaBtn: document.getElementById('modalPortadaBtn'),
   conjuntsPanel: document.getElementById('conjuntsPanel'),
   conjuntChipsList: document.getElementById('conjuntChipsList'),
@@ -1771,6 +1775,46 @@ els.exportCatalogBtn.addEventListener('click', function(){
   // rapid sequential downloads
   state.conjunts.forEach(function(c, i){ setTimeout(function(){ exportConjunt(c, i); }, i * 400); });
   showToast(state.conjunts.length + (state.conjunts.length===1?' fitxer exportat.':' fitxers exportats.'));
+});
+
+// -- Import a JSON (per-conjunt export, or older whole-catalog shapes) into
+//    the current catalog. Needs a PDF open (that's what the panels hang off);
+//    the conjunt data loads regardless, page previews just need the matching
+//    manual. --
+function importCatalogJson(data){
+  var list = data && data.conjunt ? [data.conjunt]
+    : (data && Array.isArray(data.conjunts) ? data.conjunts
+    : (Array.isArray(data) ? data : null));
+  if(!list){ showToast('El JSON no sembla un catàleg vàlid.'); return; }
+  normalizeConjunts(list); // migrate legacy flat-rows shape; ensure subgrups + num
+  list.forEach(function(c){
+    c.id = uid(); // fresh ids so an import never collides with existing state
+    (c.grups||[]).forEach(function(g){ g.id = uid(); (g.subgrups||[]).forEach(function(sg){ sg.id = uid(); }); });
+    state.conjunts.push(c);
+  });
+  if(data && data.machine){
+    ['serial','model','client'].forEach(function(k){ if(!state.machine[k] && data.machine[k]) state.machine[k] = data.machine[k]; });
+  }
+  if(!state.portadaPage && data && data.portadaPage) state.portadaPage = data.portadaPage;
+  persistConjunts();
+  renderMachinePanel();
+  renderConjuntsPanel();
+  showToast(list.length + (list.length===1 ? ' conjunt importat.' : ' conjunts importats.'));
+}
+els.importJsonBtn.addEventListener('click', function(){ els.importJsonInput.click(); });
+els.importJsonInput.addEventListener('change', function(e){
+  var file = e.target.files && e.target.files[0];
+  els.importJsonInput.value = '';
+  if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev){
+    var data;
+    try{ data = JSON.parse(ev.target.result); }
+    catch(err){ showToast('El fitxer no és un JSON vàlid.'); return; }
+    importCatalogJson(data);
+  };
+  reader.onerror = function(){ showToast('No s\'ha pogut llegir el fitxer.'); };
+  reader.readAsText(file);
 });
 
 // ---- Export ----
