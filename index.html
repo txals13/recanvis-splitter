@@ -99,6 +99,15 @@
     border-radius:8px; font-size:13px; z-index:200; display:none;
   }
 
+  /* ---- Machine info (serial / model / client / portada) ---- */
+  #machinePanel{
+    display:none; border-bottom:1px solid var(--border); padding:10px 16px;
+    background:var(--panel); align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  #machinePanel strong{font-size:13px; margin-right:4px;}
+  #machinePanel input{width:150px;}
+  #portadaInfo{font-size:12px; color:var(--muted);}
+
   /* ---- Conjunts (top-level) ---- */
   #conjuntsPanel{
     display:none; border-bottom:1px solid var(--border); padding:12px 16px;
@@ -206,6 +215,15 @@
   <button id="newFileBtn">Obre un altre PDF</button>
 </header>
 
+<div id="machinePanel">
+  <strong>Màquina</strong>
+  <input type="text" id="machSerial" placeholder="Núm. de sèrie">
+  <input type="text" id="machModel" placeholder="Model">
+  <input type="text" id="machClient" placeholder="Client">
+  <span id="portadaInfo">Portada: —</span>
+  <button id="portadaClearBtn" style="display:none;">Treu portada</button>
+</div>
+
 <div id="conjuntsPanel">
   <div id="conjuntsPanelHeader">
     <strong>Conjunts</strong>
@@ -236,6 +254,7 @@
     <span id="modalPageLabel"></span>
     <button id="modalNext">Següent ▶</button>
     <button id="modalToggle">Selecciona aquesta pàgina</button>
+    <button id="modalPortadaBtn">Marca com a portada</button>
     <button id="modalClose">Tanca ✕</button>
   </div>
   <div id="modalImgWrap"><canvas id="modalCanvas"></canvas></div>
@@ -381,6 +400,13 @@ var els = {
   modalClose: document.getElementById('modalClose'),
   toast: document.getElementById('toast'),
   createConjuntBtn: document.getElementById('createConjuntBtn'),
+  machinePanel: document.getElementById('machinePanel'),
+  machSerial: document.getElementById('machSerial'),
+  machModel: document.getElementById('machModel'),
+  machClient: document.getElementById('machClient'),
+  portadaInfo: document.getElementById('portadaInfo'),
+  portadaClearBtn: document.getElementById('portadaClearBtn'),
+  modalPortadaBtn: document.getElementById('modalPortadaBtn'),
   conjuntsPanel: document.getElementById('conjuntsPanel'),
   conjuntChipsList: document.getElementById('conjuntChipsList'),
   exportCatalogBtn: document.getElementById('exportCatalogBtn'),
@@ -426,6 +452,8 @@ var state = {
   renderQueue: [],
   activeRenders: 0,
   conjunts: [],
+  machine: {serial:'',model:'',client:''},
+  portadaPage: null,
   currentConjuntId: null,
   editingGrup: null,
   pendingMenuImport: null
@@ -464,9 +492,11 @@ function resetApp(){
   state.selected = new Set(); state.cells = [];
   state.conjunts = []; state.editingGrup = null; state.currentConjuntId = null;
   state.pendingMenuImport = null;
+  state.machine = emptyMachine(); state.portadaPage = null;
   els.grid.innerHTML = '';
   els.header.style.display = 'none';
   els.footer.style.display = 'none';
+  els.machinePanel.style.display = 'none';
   els.conjuntsPanel.style.display = 'none';
   els.conjuntChipsList.innerHTML = '';
   els.dropzone.style.display = 'block';
@@ -503,7 +533,11 @@ function loadPdf(bytesForPdfjs){
     els.fileInfo.textContent = state.fileName + '.pdf — ' + state.numPages + ' pàgines';
     setStatus('');
     updateSelCount();
-    state.conjunts = loadConjuntsForFile(state.fileName);
+    var cat = loadCatalogForFile(state.fileName);
+    state.machine = cat.machine;
+    state.portadaPage = cat.portadaPage;
+    state.conjunts = cat.conjunts;
+    renderMachinePanel();
     renderConjuntsPanel();
   }).catch(function(err){
     console.error(err);
@@ -695,6 +729,7 @@ function openModal(page){
 function renderModalPage(page){
   els.modalPageLabel.textContent = 'Pàgina ' + page + ' de ' + state.numPages;
   updateModalToggleLabel();
+  updateModalPortadaLabel();
   state.pdfDoc.getPage(page).then(function(pdfPage){
     var vp0 = pdfPage.getViewport({scale:1});
     var maxWidth = Math.min(window.innerWidth*0.9, 1100);
@@ -711,6 +746,17 @@ function updateModalToggleLabel(){
     ? '✓ Pàgina seleccionada (treu-la)'
     : 'Selecciona aquesta pàgina';
 }
+function updateModalPortadaLabel(){
+  els.modalPortadaBtn.textContent = (state.portadaPage === state.modalPage)
+    ? '✓ És la portada (treu-la)'
+    : 'Marca com a portada';
+}
+els.modalPortadaBtn.addEventListener('click', function(){
+  state.portadaPage = (state.portadaPage === state.modalPage) ? null : state.modalPage;
+  persistConjunts();
+  renderMachinePanel();
+  updateModalPortadaLabel();
+});
 els.modalPrev.addEventListener('click', function(){
   if(state.modalPage > 1){ state.modalPage--; renderModalPage(state.modalPage); }
 });
@@ -754,12 +800,22 @@ function loadAllCatalogs(){
   try{ return JSON.parse(localStorage.getItem(CATALOG_LS_KEY) || '{}'); }
   catch(e){ return {}; }
 }
-function loadConjuntsForFile(fileName){
-  return loadAllCatalogs()[fileName] || [];
+function emptyMachine(){ return {serial:'', model:'', client:''}; }
+// A stored catalog is now { machine, portadaPage, conjunts }. Older stores
+// held just the bare conjunts array — migrate those on read.
+function loadCatalogForFile(fileName){
+  var raw = loadAllCatalogs()[fileName];
+  if(!raw) return { machine:emptyMachine(), portadaPage:null, conjunts:[] };
+  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, conjunts:raw };
+  return {
+    machine: Object.assign(emptyMachine(), raw.machine || {}),
+    portadaPage: raw.portadaPage || null,
+    conjunts: raw.conjunts || []
+  };
 }
 function persistConjunts(){
   var all = loadAllCatalogs();
-  all[state.fileName] = state.conjunts;
+  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, conjunts: state.conjunts };
   localStorage.setItem(CATALOG_LS_KEY, JSON.stringify(all));
 }
 function uid(){
@@ -1014,6 +1070,30 @@ function deleteConjunt(id){
 }
 
 // -- Conjunts panel (top level) --
+function renderMachinePanel(){
+  els.machinePanel.style.display = 'flex';
+  els.machSerial.value = state.machine.serial || '';
+  els.machModel.value = state.machine.model || '';
+  els.machClient.value = state.machine.client || '';
+  if(state.portadaPage){
+    els.portadaInfo.textContent = 'Portada: pàg. ' + state.portadaPage + ' (clica per veure)';
+    els.portadaInfo.style.cursor = 'pointer';
+    els.portadaClearBtn.style.display = 'inline-block';
+  } else {
+    els.portadaInfo.textContent = 'Portada: — (marca-la des de la vista d\'una pàgina)';
+    els.portadaInfo.style.cursor = 'default';
+    els.portadaClearBtn.style.display = 'none';
+  }
+}
+// machine fields: update state live, persist on blur/enter (avoid rewriting the
+// whole catalog on every keystroke)
+[['machSerial','serial'],['machModel','model'],['machClient','client']].forEach(function(pair){
+  els[pair[0]].addEventListener('input', function(){ state.machine[pair[1]] = els[pair[0]].value; });
+  els[pair[0]].addEventListener('change', function(){ persistConjunts(); });
+});
+els.portadaClearBtn.addEventListener('click', function(){ state.portadaPage = null; persistConjunts(); renderMachinePanel(); });
+els.portadaInfo.addEventListener('click', function(){ if(state.portadaPage) openModal(state.portadaPage); });
+
 function renderConjuntsPanel(){
   els.conjuntsPanel.style.display = state.conjunts.length ? 'block' : 'none';
   els.conjuntChipsList.innerHTML = '';
