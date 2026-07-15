@@ -278,6 +278,7 @@
   <div class="reviewCard" id="conjuntDetailCard">
     <div class="reviewTop">
       <input type="text" id="conjuntDetailNameInput">
+      <button id="pickConjuntNameBtn" title="Tria el nom clicant-lo al dibuix">🎯 Tria del dibuix</button>
       <button id="conjuntDetailCloseBtn">Tanca ✕</button>
     </div>
     <div id="grupsList"></div>
@@ -337,6 +338,7 @@
       <tbody id="reviewTableBody"></tbody>
     </table>
     <button id="addRowBtn">+ Afegeix fila</button>
+    <button id="pickSubgrupBtn" title="Tria el subgrup clicant-lo al dibuix (s'aplica a totes les files)">🎯 Subgrup del dibuix</button>
     <div class="reviewActions" style="margin-top:16px;">
       <div class="left">
         <button id="deleteGrupBtn">Elimina el grup</button>
@@ -434,6 +436,8 @@ var els = {
   grupModalOverlay: document.getElementById('grupModalOverlay'),
   reviewNameInput: document.getElementById('reviewNameInput'),
   pickGrupNameBtn: document.getElementById('pickGrupNameBtn'),
+  pickConjuntNameBtn: document.getElementById('pickConjuntNameBtn'),
+  pickSubgrupBtn: document.getElementById('pickSubgrupBtn'),
   modalPickHint: document.getElementById('modalPickHint'),
   modalImgWrap: document.getElementById('modalImgWrap'),
   reviewPagesLabel: document.getElementById('reviewPagesLabel'),
@@ -854,6 +858,23 @@ function closeModal(){
 els.pickGrupNameBtn.addEventListener('click', function(){
   var pages = state.editingGrup && state.editingGrup.pages;
   startPicking(pages && pages[0], function(text){ els.reviewNameInput.value = text; });
+});
+function firstPageOfConjunt(conjuntId){
+  var c = state.conjunts.find(function(x){ return x.id === conjuntId; });
+  if(!c) return null;
+  for(var i=0;i<c.grups.length;i++){ if(c.grups[i].pages && c.grups[i].pages.length) return c.grups[i].pages[0]; }
+  return null;
+}
+els.pickConjuntNameBtn.addEventListener('click', function(){
+  startPicking(firstPageOfConjunt(state.currentConjuntId), function(text){ els.conjuntDetailNameInput.value = text; });
+});
+els.pickSubgrupBtn.addEventListener('click', function(){
+  var eg = state.editingGrup;
+  if(!eg || !eg.rows.length){ showToast('Afegeix primer les peces (files) per aplicar-hi el subgrup.'); return; }
+  startPicking(eg.pages && eg.pages[0], function(text){
+    eg.rows.forEach(function(r){ r.subgrup = text; });
+    renderReviewTable();
+  });
 });
 
 // ---- Catalog (spare parts) ----
