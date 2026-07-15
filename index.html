@@ -863,7 +863,11 @@ function getPageLines(page){
 //    guarantees quality, since column layouts vary between manual sections) --
 function extractRowsFromPage(page){
   return getPageLines(page).then(function(lines){
-    return lines.map(function(text){ return parseLineToRow(text, page); });
+    // Only keep real part rows — those with BOTH a position and a reference.
+    // Everything else on a drawing sheet (title boxes, list headers, loose
+    // dimension/label text) has no Pos+Ref and would just be noise.
+    return lines.map(function(text){ return parseLineToRow(text, page); })
+                .filter(function(r){ return r.pos && r.ref; });
   });
 }
 
