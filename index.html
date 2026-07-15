@@ -78,11 +78,13 @@
   }
   .cell:hover .zoomBtn{opacity:1;}
   #modalOverlay{
-    position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:100;
+    position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:150;
     display:none; align-items:center; justify-content:center; flex-direction:column;
   }
   #modalOverlay.open{display:flex;}
-  #modalTop{display:flex; align-items:center; gap:16px; color:var(--text); margin-bottom:10px;}
+  #modalTop{display:flex; align-items:center; gap:16px; color:var(--text); margin-bottom:10px; flex-wrap:wrap;}
+  #modalPickHint{display:none; background:var(--accent2); color:#fff; padding:6px 12px; border-radius:6px; font-size:13px;}
+  #modalImgWrap.picking canvas{cursor:crosshair;}
   #modalImgWrap{max-width:92vw; max-height:78vh; overflow:auto; background:#0a0b0e; border-radius:8px;}
   #modalImgWrap canvas{display:block; max-width:none;}
   #modalOverlay button{padding:8px 14px;}
@@ -256,6 +258,7 @@
     <button id="modalToggle">Selecciona aquesta pàgina</button>
     <button id="modalPortadaBtn">Marca com a portada</button>
     <button id="modalClose">Tanca ✕</button>
+    <span id="modalPickHint">🎯 Clica el text del nom al dibuix (Esc per cancel·lar)</span>
   </div>
   <div id="modalImgWrap"><canvas id="modalCanvas"></canvas></div>
 </div>
@@ -310,6 +313,7 @@
   <div class="reviewCard">
     <div class="reviewTop">
       <input type="text" id="reviewNameInput">
+      <button id="pickGrupNameBtn" title="Tria el nom clicant-lo al dibuix">🎯 Tria del dibuix</button>
       <span id="reviewPagesLabel" style="color:var(--muted); font-size:12px;"></span>
     </div>
     <div id="reviewPendingPanel">
@@ -429,6 +433,9 @@ var els = {
   menuImportConfirm: document.getElementById('menuImportConfirm'),
   grupModalOverlay: document.getElementById('grupModalOverlay'),
   reviewNameInput: document.getElementById('reviewNameInput'),
+  pickGrupNameBtn: document.getElementById('pickGrupNameBtn'),
+  modalPickHint: document.getElementById('modalPickHint'),
+  modalImgWrap: document.getElementById('modalImgWrap'),
   reviewPagesLabel: document.getElementById('reviewPagesLabel'),
   reviewPendingPanel: document.getElementById('reviewPendingPanel'),
   assignPagesBtn: document.getElementById('assignPagesBtn'),
@@ -456,7 +463,9 @@ var state = {
   portadaPage: null,
   currentConjuntId: null,
   editingGrup: null,
-  pendingMenuImport: null
+  pendingMenuImport: null,
+  pickingTarget: null, // callback(text) while picking a name from the drawing
+  pickLines: []        // clickable text-line geometry for the current modal page
 };
 
 function showToast(msg, ms){
@@ -738,9 +747,69 @@ function renderModalPage(page){
     els.modalCanvas.width = viewport.width;
     els.modalCanvas.height = viewport.height;
     var ctx = els.modalCanvas.getContext('2d');
-    return pdfPage.render({canvasContext: ctx, viewport: viewport}).promise;
+    var renderP = pdfPage.render({canvasContext: ctx, viewport: viewport}).promise;
+    if(state.pickingTarget){
+      pdfPage.getTextContent().then(function(tc){ state.pickLines = buildPickLines(tc, viewport); });
+    }
+    return renderP;
   });
 }
+// Reconstructs clickable text lines (with canvas geometry) for name-picking:
+// groups pdf.js text items into lines by their PDF y, and records each line's
+// canvas y (cy) + height (ch) so a click can be matched to the line under it.
+function buildPickLines(tc, viewport){
+  var lines = [];
+  tc.items.forEach(function(it){
+    if(!it.str || !it.str.trim()) return;
+    var y = it.transform[5], line = null;
+    for(var i=0;i<lines.length;i++){ if(Math.abs(lines[i].py - y) < 3){ line = lines[i]; break; } }
+    if(!line){
+      var t = pdfjsLib.Util.transform(viewport.transform, it.transform);
+      line = { py:y, cy:t[5], ch:Math.hypot(t[2],t[3]) || 12, items:[] };
+      lines.push(line);
+    }
+    line.items.push({ x: it.transform[4], w: it.width || 0, str: it.str });
+  });
+  return lines.map(function(l){
+    l.items.sort(function(a,b){ return a.x - b.x; });
+    var text = '', prevEnd = null;
+    l.items.forEach(function(it){ if(prevEnd !== null && (it.x - prevEnd) > 1) text += ' '; text += it.str; prevEnd = it.x + it.w; });
+    return { cy:l.cy, ch:l.ch, text: text.replace(/\s+/g,' ').trim() };
+  }).filter(function(l){ return l.text; });
+}
+// Opens `page` in the modal in name-picking mode; the next text line the user
+// clicks is passed to cb(text). Falls back with a toast if there's no page.
+function startPicking(page, cb){
+  if(!page){ showToast('Aquest element encara no té cap pàgina d\'on triar el text.'); return; }
+  state.pickingTarget = cb;
+  state.pickLines = [];
+  els.modalPickHint.style.display = 'inline-block';
+  els.modalImgWrap.classList.add('picking');
+  openModal(page);
+}
+function endPicking(){
+  state.pickingTarget = null;
+  state.pickLines = [];
+  els.modalPickHint.style.display = 'none';
+  els.modalImgWrap.classList.remove('picking');
+}
+els.modalCanvas.addEventListener('click', function(e){
+  if(!state.pickingTarget) return;
+  var rect = els.modalCanvas.getBoundingClientRect();
+  var scaleY = rect.height ? (els.modalCanvas.height / rect.height) : 1;
+  var cy = (e.clientY - rect.top) * scaleY;
+  var best = null, bestD = 1e9;
+  state.pickLines.forEach(function(l){ var d = Math.abs(l.cy - cy); if(d < bestD){ bestD = d; best = l; } });
+  if(best && bestD < best.ch * 1.5 + 12){
+    var cb = state.pickingTarget;
+    endPicking();
+    closeModal();
+    cb(best.text);
+    showToast('Nom triat: ' + best.text);
+  } else {
+    showToast('Cap text just aquí — clica sobre una línia de text.');
+  }
+});
 function updateModalToggleLabel(){
   els.modalToggle.textContent = state.selected.has(state.modalPage)
     ? '✓ Pàgina seleccionada (treu-la)'
@@ -780,7 +849,12 @@ document.addEventListener('keydown', function(e){
 });
 function closeModal(){
   els.modalOverlay.classList.remove('open');
+  if(state.pickingTarget) endPicking();
 }
+els.pickGrupNameBtn.addEventListener('click', function(){
+  var pages = state.editingGrup && state.editingGrup.pages;
+  startPicking(pages && pages[0], function(text){ els.reviewNameInput.value = text; });
+});
 
 // ---- Catalog (spare parts) ----
 // Data model, matching the manual's own terminology:
