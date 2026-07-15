@@ -162,11 +162,13 @@
   table.rowsTable td.posCol input{width:60px;}
   table.rowsTable td.cantCol input{width:60px;}
   table.rowsTable td.refCol input{width:120px;}
-  table.rowsTable td.grupCol input{width:100px;}
-  table.rowsTable td.subCol input{width:100px;}
-  table.rowsTable td.subNumCol input{width:100px;}
   table.rowsTable td.rmCol{width:30px;}
   .rmRowBtn{width:26px; height:26px; padding:0; color:var(--danger); border-color:var(--border);}
+  .subgrupBox{border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:12px; background:var(--panel2);}
+  .subgrupHdr{display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;}
+  .subgrupHdr .sgLabel{font-size:12px; color:var(--muted);}
+  .subgrupHdr input{width:260px;}
+  .subgrupHdr .sgDel{color:var(--danger); margin-left:auto;}
   .reviewActions{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
   .reviewActions .left{display:flex; gap:8px;}
   .reviewActions .right{display:flex; gap:8px;}
@@ -278,7 +280,9 @@
   <div class="reviewCard" id="conjuntDetailCard">
     <div class="reviewTop">
       <input type="text" id="conjuntDetailNameInput">
-      <button id="pickConjuntNameBtn" title="Tria el nom clicant-lo al dibuix">🎯 Tria del dibuix</button>
+      <button id="pickConjuntNameBtn" title="Tria el nom clicant-lo al dibuix">🎯 Nom</button>
+      <input type="text" id="conjuntDetailNumInput" placeholder="Núm. de dibuix" style="width:150px;">
+      <button id="pickConjuntNumBtn" title="Tria el número de dibuix clicant-lo al dibuix">🎯 Núm.</button>
       <button id="conjuntDetailCloseBtn">Tanca ✕</button>
     </div>
     <div id="grupsList"></div>
@@ -322,23 +326,8 @@
       <button id="assignPagesBtn">Selecciona pàgines a la graella primer</button>
     </div>
     <div class="reviewThumbs" id="reviewThumbs"></div>
-    <table class="rowsTable" id="reviewTable">
-      <thead>
-        <tr>
-          <th class="posCol">Pos.</th>
-          <th class="refCol">Ref.</th>
-          <th class="cantCol">Cant.</th>
-          <th class="grupCol">Grup</th>
-          <th class="subCol">Subgrup</th>
-          <th class="subNumCol">Num.</th>
-          <th>Denominació</th>
-          <th class="rmCol"></th>
-        </tr>
-      </thead>
-      <tbody id="reviewTableBody"></tbody>
-    </table>
-    <button id="addRowBtn">+ Afegeix fila</button>
-    <button id="pickSubgrupBtn" title="Tria el subgrup clicant-lo al dibuix (s'aplica a totes les files)">🎯 Subgrup del dibuix</button>
+    <div id="subgrupsList"></div>
+    <button id="addSubgrupBtn">+ Afegeix subgrup</button>
     <div class="reviewActions" style="margin-top:16px;">
       <div class="left">
         <button id="deleteGrupBtn">Elimina el grup</button>
@@ -437,16 +426,16 @@ var els = {
   reviewNameInput: document.getElementById('reviewNameInput'),
   pickGrupNameBtn: document.getElementById('pickGrupNameBtn'),
   pickConjuntNameBtn: document.getElementById('pickConjuntNameBtn'),
-  pickSubgrupBtn: document.getElementById('pickSubgrupBtn'),
+  conjuntDetailNumInput: document.getElementById('conjuntDetailNumInput'),
+  pickConjuntNumBtn: document.getElementById('pickConjuntNumBtn'),
+  subgrupsList: document.getElementById('subgrupsList'),
+  addSubgrupBtn: document.getElementById('addSubgrupBtn'),
   modalPickHint: document.getElementById('modalPickHint'),
   modalImgWrap: document.getElementById('modalImgWrap'),
   reviewPagesLabel: document.getElementById('reviewPagesLabel'),
   reviewPendingPanel: document.getElementById('reviewPendingPanel'),
   assignPagesBtn: document.getElementById('assignPagesBtn'),
   reviewThumbs: document.getElementById('reviewThumbs'),
-  reviewTable: document.getElementById('reviewTable'),
-  reviewTableBody: document.getElementById('reviewTableBody'),
-  addRowBtn: document.getElementById('addRowBtn'),
   deleteGrupBtn: document.getElementById('deleteGrupBtn'),
   reviewCancelBtn: document.getElementById('reviewCancelBtn'),
   reviewSaveBtn: document.getElementById('reviewSaveBtn')
@@ -846,7 +835,10 @@ els.modalOverlay.addEventListener('click', function(e){
 });
 document.addEventListener('keydown', function(e){
   if(!els.modalOverlay.classList.contains('open')) return;
-  if(e.key === 'Escape') closeModal();
+  // stopImmediatePropagation: the later document-level Escape handler runs on
+  // this same event and would see the modal as already closed — without this,
+  // Esc while picking would also cancel the grup review underneath.
+  if(e.key === 'Escape'){ closeModal(); e.stopImmediatePropagation(); return; }
   if(e.key === 'ArrowLeft') els.modalPrev.click();
   if(e.key === 'ArrowRight') els.modalNext.click();
   if(e.key === ' '){ e.preventDefault(); els.modalToggle.click(); }
@@ -857,7 +849,7 @@ function closeModal(){
 }
 els.pickGrupNameBtn.addEventListener('click', function(){
   var pages = state.editingGrup && state.editingGrup.pages;
-  startPicking(pages && pages[0], function(text){ els.reviewNameInput.value = text; });
+  startPicking(pages && pages[0], function(text){ els.reviewNameInput.value = stripTitleLabel(text); });
 });
 function firstPageOfConjunt(conjuntId){
   var c = state.conjunts.find(function(x){ return x.id === conjuntId; });
@@ -865,15 +857,22 @@ function firstPageOfConjunt(conjuntId){
   for(var i=0;i<c.grups.length;i++){ if(c.grups[i].pages && c.grups[i].pages.length) return c.grups[i].pages[0]; }
   return null;
 }
+// Setting an input's value programmatically doesn't fire its 'input' listener,
+// so picked conjunt fields write to the model and persist explicitly.
 els.pickConjuntNameBtn.addEventListener('click', function(){
-  startPicking(firstPageOfConjunt(state.currentConjuntId), function(text){ els.conjuntDetailNameInput.value = text; });
+  startPicking(firstPageOfConjunt(state.currentConjuntId), function(text){
+    var name = stripTitleLabel(text);
+    els.conjuntDetailNameInput.value = name;
+    var c = state.conjunts.find(function(x){ return x.id === state.currentConjuntId; });
+    if(c && name){ c.name = name; persistConjunts(); renderConjuntsPanel(); }
+  });
 });
-els.pickSubgrupBtn.addEventListener('click', function(){
-  var eg = state.editingGrup;
-  if(!eg || !eg.rows.length){ showToast('Afegeix primer les peces (files) per aplicar-hi el subgrup.'); return; }
-  startPicking(eg.pages && eg.pages[0], function(text){
-    eg.rows.forEach(function(r){ r.subgrup = text; });
-    renderReviewTable();
+els.pickConjuntNumBtn.addEventListener('click', function(){
+  startPicking(firstPageOfConjunt(state.currentConjuntId), function(text){
+    var num = extractCodeFromLine(text);
+    els.conjuntDetailNumInput.value = num;
+    var c = state.conjunts.find(function(x){ return x.id === state.currentConjuntId; });
+    if(c && num){ c.num = num; persistConjunts(); renderConjuntsPanel(); }
   });
 });
 
@@ -901,12 +900,39 @@ function emptyMachine(){ return {serial:'', model:'', client:''}; }
 function loadCatalogForFile(fileName){
   var raw = loadAllCatalogs()[fileName];
   if(!raw) return { machine:emptyMachine(), portadaPage:null, conjunts:[] };
-  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, conjunts:raw };
+  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, conjunts:normalizeConjunts(raw) };
   return {
     machine: Object.assign(emptyMachine(), raw.machine || {}),
     portadaPage: raw.portadaPage || null,
-    conjunts: raw.conjunts || []
+    conjunts: normalizeConjunts(raw.conjunts || [])
   };
+}
+// Migrates stored conjunts to the current hierarchy:
+//   Conjunt {name, num} > Grup {name, pages} > Subgrup {name, rows}.
+// Older grups held a flat rows[] where each row carried grup/subgrup/
+// subgrupNum text fields — those rows are regrouped into Subgrup containers
+// by their subgrup value, and the first subgrupNum found is hoisted up as the
+// conjunt's drawing number (it was the same title-block Nº on every sheet).
+function normalizeConjunts(conjunts){
+  (conjunts||[]).forEach(function(c){
+    if(c.num === undefined || c.num === null) c.num = '';
+    (c.grups||[]).forEach(function(g){
+      if(g.subgrups) return; // already migrated
+      var subs = [], byName = {};
+      (g.rows||[]).forEach(function(r){
+        if(!c.num && r.subgrupNum) c.num = r.subgrupNum;
+        var key = r.subgrup || '';
+        if(!byName[key]){ byName[key] = {id:uid(), name:key, rows:[]}; subs.push(byName[key]); }
+        byName[key].rows.push({pos:r.pos||'', ref:r.ref||'', cant:r.cant||'', denominacio:r.denominacio||'', page:r.page});
+      });
+      g.subgrups = subs;
+      delete g.rows;
+    });
+  });
+  return conjunts;
+}
+function grupRowCount(g){
+  return (g.subgrups||[]).reduce(function(sum,sg){ return sum + sg.rows.length; }, 0);
 }
 function persistConjunts(){
   var all = loadAllCatalogs();
@@ -997,23 +1023,36 @@ function extractSubgrupNumFromPage(page){
   }).catch(function(){ return ''; });
 }
 
-// Extracts rows for every page of a Grup and stamps the Grup's name plus
-// each page's own subgrup name/number (if any) onto its rows.
-function buildRowsForGrup(pages, grupName){
+// Title-block labels are not part of the name itself: picking or extracting
+// "SUBGRUPO BANCADA DR." should yield "BANCADA DR.".
+function stripTitleLabel(s){
+  return (s||'').replace(/^\s*(GRUPO|SUBGRUPO|CONJUNTO|GRUP|SUBGRUP|CONJUNT)\s*[:.\-]?\s*/i, '').trim();
+}
+// Pulls a drawing-number-looking code out of a clicked line: prefers the code
+// after the DIN paper-size prefix ("A-4 ZO-200-95"), else any dash-code.
+function extractCodeFromLine(text){
+  var m = (text||'').match(/[A-Z]-\d+\s+([A-Z0-9]+(?:-[A-Z0-9]+)+)/);
+  if(m) return m[1];
+  m = (text||'').match(/([A-Z0-9]+(?:-[A-Z0-9]+)+)/);
+  return m ? m[1] : (text||'').trim();
+}
+// Builds the Subgrup containers for a set of pages: one per page, named after
+// the page's own SUBGRUPO title-block field, holding that page's part rows.
+// Consecutive pages with the same subgrup name are merged into one subgrup
+// (drawings whose parts list spans several sheets).
+function buildSubgrupsForPages(pages){
   return Promise.all(pages.map(function(p){
-    return Promise.all([
-      extractRowsFromPage(p), extractSubgrupFromPage(p), extractSubgrupNumFromPage(p)
-    ]).then(function(res){
-      var rows = res[0], subgrup = res[1], subgrupNum = res[2];
-      rows.forEach(function(r){
-        r.grup = grupName || '';
-        r.subgrup = subgrup;
-        r.subgrupNum = subgrupNum;
-      });
-      return rows;
+    return Promise.all([extractRowsFromPage(p), extractSubgrupFromPage(p)]).then(function(res){
+      return { name: stripTitleLabel(res[1] || ''), rows: res[0] };
     });
-  })).then(function(rowsPerPage){
-    return [].concat.apply([], rowsPerPage);
+  })).then(function(perPage){
+    var subs = [];
+    perPage.forEach(function(pp){
+      var last = subs[subs.length-1];
+      if(last && last.name === pp.name){ last.rows = last.rows.concat(pp.rows); }
+      else subs.push({ id: uid(), name: pp.name, rows: pp.rows });
+    });
+    return subs;
   });
 }
 
@@ -1098,7 +1137,7 @@ function parseLineToRow(text, page){
       denomParts = denomParts.slice(0, -1);
     }
   }
-  return {pos:pos, ref:ref, cant:cant, grup:'', subgrup:'', subgrupNum:'', denominacio:denomParts.join(' '), page:page};
+  return {pos:pos, ref:ref, cant:cant, denominacio:denomParts.join(' '), page:page};
 }
 
 // -- Name modal: shared by "create a Conjunt" and "add a Grup to a Conjunt" --
@@ -1160,7 +1199,7 @@ els.nameModalCreate.addEventListener('click', function(){
 });
 
 function createConjuntWithGrup(name, pages){
-  var conjunt = {id: uid(), name: name, grups: []};
+  var conjunt = {id: uid(), name: name, num: '', grups: []};
   state.conjunts.push(conjunt);
   addGrupToConjunt(conjunt.id, name, pages, true);
 }
@@ -1204,8 +1243,8 @@ function renderConjuntsPanel(){
     chip.className = 'conjuntChip';
     var nameEl = document.createElement('div');
     nameEl.className = 'gName';
-    nameEl.textContent = c.name;
-    var rowCount = c.grups.reduce(function(sum,g){ return sum + g.rows.length; }, 0);
+    nameEl.textContent = c.name + (c.num ? ' · ' + c.num : '');
+    var rowCount = c.grups.reduce(function(sum,g){ return sum + grupRowCount(g); }, 0);
     var metaEl = document.createElement('div');
     metaEl.className = 'gMeta';
     metaEl.textContent = c.grups.length + (c.grups.length===1?' grup · ':' grups · ') +
@@ -1233,6 +1272,7 @@ function openConjuntDetail(conjuntId){
   if(!c) return;
   state.currentConjuntId = conjuntId;
   els.conjuntDetailNameInput.value = c.name;
+  els.conjuntDetailNumInput.value = c.num || '';
   renderGrupsList(c);
   els.conjuntDetailOverlay.classList.add('open');
 }
@@ -1259,8 +1299,9 @@ function renderGrupsList(c){
     nameEl.textContent = g.name;
     var metaEl = document.createElement('span');
     metaEl.className = 'cMeta';
+    var rc = grupRowCount(g), sgc = (g.subgrups||[]).length;
     metaEl.textContent = g.pages.length
-      ? ('Pàg. ' + g.pages.join(', ') + ' · ' + g.rows.length + (g.rows.length===1?' fila':' files'))
+      ? ('Pàg. ' + g.pages.join(', ') + ' · ' + sgc + (sgc===1?' subgrup · ':' subgrups · ') + rc + (rc===1?' fila':' files'))
       : 'Pendent d\'assignar pàgines';
     info.appendChild(nameEl); info.appendChild(metaEl);
     var delBtn = document.createElement('button');
@@ -1290,6 +1331,14 @@ els.conjuntDetailNameInput.addEventListener('blur', function(){
   persistConjunts();
   renderConjuntsPanel();
 });
+els.conjuntDetailNumInput.addEventListener('input', function(){
+  var c = state.conjunts.find(function(x){ return x.id === state.currentConjuntId; });
+  if(c) c.num = els.conjuntDetailNumInput.value.trim();
+});
+els.conjuntDetailNumInput.addEventListener('blur', function(){
+  persistConjunts();
+  renderConjuntsPanel();
+});
 els.deleteConjuntBtn.addEventListener('click', function(){
   var conjuntId = state.currentConjuntId;
   closeConjuntDetail();
@@ -1308,8 +1357,12 @@ function addGrupToConjunt(conjuntId, name, pages, isNewConjunt){
   var c = state.conjunts.find(function(x){ return x.id === conjuntId; });
   if(!c) return;
   setStatus('Extraient text de ' + pages.length + ' pàgines…');
-  buildRowsForGrup(pages, name).then(function(rows){
-    var grup = {id: uid(), name: name, pages: pages, rows: rows};
+  Promise.all([
+    buildSubgrupsForPages(pages),
+    c.num ? Promise.resolve('') : extractSubgrupNumFromPage(pages[0]) // fill a missing conjunt Nº from the sheet's title block
+  ]).then(function(res){
+    var grup = {id: uid(), name: name, pages: pages, subgrups: res[0]};
+    if(!c.num && res[1]) c.num = res[1];
     c.grups.push(grup);
     persistConjunts();
     renderConjuntsPanel();
@@ -1390,7 +1443,7 @@ els.menuImportConfirm.addEventListener('click', function(){
   var added = 0;
   checks.forEach(function(cb){
     if(cb.checked){
-      c.grups.push({id: uid(), name: pending.names[parseInt(cb.dataset.idx,10)], pages: [], rows: []});
+      c.grups.push({id: uid(), name: pending.names[parseInt(cb.dataset.idx,10)], pages: [], subgrups: []});
       added++;
     }
   });
@@ -1411,8 +1464,10 @@ function openGrupReview(conjuntId, grupId, isNew, isNewConjunt){
     id: g.id,
     isNew: !!isNew,
     isNewConjunt: !!isNewConjunt,
-    rows: g.rows.map(function(r){
-      return {pos:r.pos, ref:r.ref, cant:r.cant, grup:r.grup, subgrup:r.subgrup, subgrupNum:r.subgrupNum, denominacio:r.denominacio, page:r.page};
+    subgrups: (g.subgrups||[]).map(function(sg){
+      return {id: sg.id, name: sg.name, rows: sg.rows.map(function(r){
+        return {pos:r.pos, ref:r.ref, cant:r.cant, denominacio:r.denominacio, page:r.page};
+      })};
     }),
     pages: g.pages.slice()
   };
@@ -1427,8 +1482,8 @@ function renderGrupReviewBody(){
   if(eg.pages.length === 0){
     els.reviewPendingPanel.style.display = 'block';
     els.reviewThumbs.style.display = 'none';
-    els.reviewTable.style.display = 'none';
-    els.addRowBtn.style.display = 'none';
+    els.subgrupsList.style.display = 'none';
+    els.addSubgrupBtn.style.display = 'none';
     els.reviewPagesLabel.textContent = '';
     var n = state.selected.size;
     els.assignPagesBtn.textContent = n
@@ -1438,8 +1493,8 @@ function renderGrupReviewBody(){
   } else {
     els.reviewPendingPanel.style.display = 'none';
     els.reviewThumbs.style.display = 'flex';
-    els.reviewTable.style.display = 'table';
-    els.addRowBtn.style.display = '';
+    els.subgrupsList.style.display = 'block';
+    els.addSubgrupBtn.style.display = '';
     els.reviewPagesLabel.textContent = 'Pàgines: ' + eg.pages.join(', ');
     els.reviewThumbs.innerHTML = '';
     eg.pages.forEach(function(p){
@@ -1447,7 +1502,7 @@ function renderGrupReviewBody(){
       els.reviewThumbs.appendChild(cv);
       renderPageToCanvas(p, cv, 260).catch(function(err){ console.warn('preview render', p, err); });
     });
-    renderReviewTable();
+    renderSubgrupsList();
   }
 }
 
@@ -1457,9 +1512,9 @@ els.assignPagesBtn.addEventListener('click', function(){
   var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
   els.assignPagesBtn.disabled = true;
   els.assignPagesBtn.textContent = 'Extraient text…';
-  buildRowsForGrup(pages, els.reviewNameInput.value.trim()).then(function(rows){
+  buildSubgrupsForPages(pages).then(function(subgrups){
     eg.pages = pages;
-    eg.rows = rows;
+    eg.subgrups = subgrups;
     renderGrupReviewBody();
   }).catch(function(err){
     showToast('Error extraient el text: ' + err.message, 4000);
@@ -1467,67 +1522,76 @@ els.assignPagesBtn.addEventListener('click', function(){
   });
 });
 
-function renderReviewTable(){
-  var rows = state.editingGrup.rows;
-  els.reviewTableBody.innerHTML = '';
-  rows.forEach(function(row, idx){
-    var tr = document.createElement('tr');
+// One box per Subgrup: editable name (typed or picked from the drawing) +
+// its own rows table (Pos, Ref, Cant, Denominació) + add-row.
+function renderSubgrupsList(){
+  var eg = state.editingGrup;
+  els.subgrupsList.innerHTML = '';
+  eg.subgrups.forEach(function(sg, sgIdx){
+    var box = document.createElement('div'); box.className = 'subgrupBox';
 
-    var tdPos = document.createElement('td'); tdPos.className = 'posCol';
-    var inPos = document.createElement('input'); inPos.type = 'text'; inPos.value = row.pos;
-    inPos.addEventListener('input', function(){ row.pos = inPos.value; });
-    tdPos.appendChild(inPos); tr.appendChild(tdPos);
-
-    var tdRef = document.createElement('td'); tdRef.className = 'refCol';
-    var inRef = document.createElement('input'); inRef.type = 'text'; inRef.value = row.ref;
-    inRef.addEventListener('input', function(){ row.ref = inRef.value; });
-    tdRef.appendChild(inRef); tr.appendChild(tdRef);
-
-    var tdCant = document.createElement('td'); tdCant.className = 'cantCol';
-    var inCant = document.createElement('input'); inCant.type = 'text'; inCant.value = row.cant;
-    inCant.addEventListener('input', function(){ row.cant = inCant.value; });
-    tdCant.appendChild(inCant); tr.appendChild(tdCant);
-
-    var tdGrup = document.createElement('td'); tdGrup.className = 'grupCol';
-    var inGrup = document.createElement('input'); inGrup.type = 'text'; inGrup.value = row.grup || '';
-    inGrup.addEventListener('input', function(){ row.grup = inGrup.value; });
-    tdGrup.appendChild(inGrup); tr.appendChild(tdGrup);
-
-    var tdSub = document.createElement('td'); tdSub.className = 'subCol';
-    var inSub = document.createElement('input'); inSub.type = 'text'; inSub.value = row.subgrup || '';
-    inSub.addEventListener('input', function(){ row.subgrup = inSub.value; });
-    tdSub.appendChild(inSub); tr.appendChild(tdSub);
-
-    var tdSubNum = document.createElement('td'); tdSubNum.className = 'subNumCol';
-    var inSubNum = document.createElement('input'); inSubNum.type = 'text'; inSubNum.value = row.subgrupNum || '';
-    inSubNum.addEventListener('input', function(){ row.subgrupNum = inSubNum.value; });
-    tdSubNum.appendChild(inSubNum); tr.appendChild(tdSubNum);
-
-    var tdDen = document.createElement('td');
-    var inDen = document.createElement('input'); inDen.type = 'text'; inDen.value = row.denominacio;
-    inDen.addEventListener('input', function(){ row.denominacio = inDen.value; });
-    tdDen.appendChild(inDen); tr.appendChild(tdDen);
-
-    var tdRm = document.createElement('td'); tdRm.className = 'rmCol';
-    var rmBtn = document.createElement('button'); rmBtn.className = 'rmRowBtn'; rmBtn.textContent = '✕';
-    rmBtn.addEventListener('click', function(){
-      state.editingGrup.rows.splice(idx, 1);
-      renderReviewTable();
+    var hdr = document.createElement('div'); hdr.className = 'subgrupHdr';
+    var lab = document.createElement('span'); lab.className = 'sgLabel'; lab.textContent = 'Subgrup';
+    var inName = document.createElement('input'); inName.type = 'text';
+    inName.placeholder = 'Nom del subgrup'; inName.value = sg.name || '';
+    inName.addEventListener('input', function(){ sg.name = inName.value; });
+    var pickBtn = document.createElement('button'); pickBtn.textContent = '🎯';
+    pickBtn.title = 'Tria el nom del subgrup clicant-lo al dibuix';
+    pickBtn.addEventListener('click', function(){
+      var page = (sg.rows.length && sg.rows[0].page) || eg.pages[0];
+      startPicking(page, function(text){ sg.name = stripTitleLabel(text); renderSubgrupsList(); });
     });
-    tdRm.appendChild(rmBtn); tr.appendChild(tdRm);
+    var delBtn = document.createElement('button'); delBtn.className = 'sgDel'; delBtn.textContent = '✕ subgrup';
+    delBtn.addEventListener('click', function(){
+      eg.subgrups.splice(sgIdx, 1);
+      renderSubgrupsList();
+    });
+    hdr.appendChild(lab); hdr.appendChild(inName); hdr.appendChild(pickBtn); hdr.appendChild(delBtn);
+    box.appendChild(hdr);
 
-    els.reviewTableBody.appendChild(tr);
+    var table = document.createElement('table'); table.className = 'rowsTable';
+    table.innerHTML = '<thead><tr><th class="posCol">Pos.</th><th class="refCol">Ref.</th>'
+      + '<th class="cantCol">Cant.</th><th>Denominació</th><th class="rmCol"></th></tr></thead>';
+    var tbody = document.createElement('tbody');
+
+    function mkCell(row, field, className){
+      var td = document.createElement('td'); if(className) td.className = className;
+      var inp = document.createElement('input'); inp.type = 'text'; inp.value = row[field] || '';
+      inp.addEventListener('input', function(){ row[field] = inp.value; });
+      td.appendChild(inp); return td;
+    }
+    sg.rows.forEach(function(row, idx){
+      var tr = document.createElement('tr');
+      tr.appendChild(mkCell(row, 'pos', 'posCol'));
+      tr.appendChild(mkCell(row, 'ref', 'refCol'));
+      tr.appendChild(mkCell(row, 'cant', 'cantCol'));
+      tr.appendChild(mkCell(row, 'denominacio', ''));
+      var tdRm = document.createElement('td'); tdRm.className = 'rmCol';
+      var rmBtn = document.createElement('button'); rmBtn.className = 'rmRowBtn'; rmBtn.textContent = '✕';
+      rmBtn.addEventListener('click', function(){ sg.rows.splice(idx, 1); renderSubgrupsList(); });
+      tdRm.appendChild(rmBtn); tr.appendChild(tdRm);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    box.appendChild(table);
+
+    var addRow = document.createElement('button'); addRow.textContent = '+ Afegeix fila';
+    addRow.addEventListener('click', function(){
+      var lastPage = sg.rows.length ? sg.rows[sg.rows.length-1].page : (eg.pages[0] || null);
+      sg.rows.push({pos:'', ref:'', cant:'', denominacio:'', page: lastPage});
+      renderSubgrupsList();
+    });
+    box.appendChild(addRow);
+
+    els.subgrupsList.appendChild(box);
   });
 }
 
-els.addRowBtn.addEventListener('click', function(){
-  var rows = state.editingGrup.rows;
-  var defaultGrup = rows.length ? rows[0].grup : els.reviewNameInput.value.trim();
-  rows.push({
-    pos:'', ref:'', cant:'', grup: defaultGrup || '', subgrup:'', subgrupNum:'',
-    denominacio:'', page: state.editingGrup.pages[0]
-  });
-  renderReviewTable();
+els.addSubgrupBtn.addEventListener('click', function(){
+  var eg = state.editingGrup;
+  if(!eg) return;
+  eg.subgrups.push({id: uid(), name: '', rows: []});
+  renderSubgrupsList();
 });
 
 els.reviewCancelBtn.addEventListener('click', function(){
@@ -1549,6 +1613,9 @@ els.grupModalOverlay.addEventListener('click', function(e){
 });
 document.addEventListener('keydown', function(e){
   if(e.key !== 'Escape') return;
+  // The page modal sits on top (e.g. while picking a name from the drawing)
+  // and its own keydown handler closes it — don't also close what's beneath.
+  if(els.modalOverlay.classList.contains('open')) return;
   if(els.nameModalOverlay.classList.contains('open')){ cancelNameModal(); return; }
   if(els.menuImportOverlay.classList.contains('open')){ cancelMenuImport(); return; }
   if(els.grupModalOverlay.classList.contains('open')){ els.reviewCancelBtn.click(); return; }
@@ -1565,7 +1632,7 @@ els.reviewSaveBtn.addEventListener('click', function(){
   if(g){
     g.name = name;
     g.pages = eg.pages;
-    g.rows = eg.rows;
+    g.subgrups = eg.subgrups;
   }
   persistConjunts();
   renderConjuntsPanel();
@@ -1594,11 +1661,16 @@ els.exportCatalogBtn.addEventListener('click', function(){
   var payload = {
     sourceFile: state.fileName + '.pdf',
     exportedAt: new Date().toISOString(),
+    machine: state.machine,
+    portadaPage: state.portadaPage,
     conjunts: state.conjunts.map(function(c){
       return {
         name: c.name,
+        num: c.num || '',
         grups: c.grups.map(function(g){
-          return {name:g.name, pages:g.pages, rows:g.rows};
+          return {name:g.name, pages:g.pages, subgrups:(g.subgrups||[]).map(function(sg){
+            return {name:sg.name, rows:sg.rows};
+          })};
         })
       };
     })
