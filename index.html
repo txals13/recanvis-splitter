@@ -232,7 +232,7 @@
 <div id="conjuntsPanel">
   <div id="conjuntsPanelHeader">
     <strong>Conjunts</strong>
-    <button id="exportCatalogBtn">Exporta catàleg (JSON)</button>
+    <button id="exportCatalogBtn">Exporta tots (un JSON per conjunt)</button>
   </div>
   <div id="conjuntChipsList"></div>
 </div>
@@ -294,7 +294,9 @@
       <div class="left">
         <button id="deleteConjuntBtn">Elimina el conjunt</button>
       </div>
-      <div class="right"></div>
+      <div class="right">
+        <button class="primary" id="exportConjuntBtn">⬇ Exporta (JSON)</button>
+      </div>
     </div>
   </div>
 </div>
@@ -419,6 +421,7 @@ var els = {
   addGrupBtn: document.getElementById('addGrupBtn'),
   importMenuBtn: document.getElementById('importMenuBtn'),
   deleteConjuntBtn: document.getElementById('deleteConjuntBtn'),
+  exportConjuntBtn: document.getElementById('exportConjuntBtn'),
   menuImportOverlay: document.getElementById('menuImportOverlay'),
   menuImportList: document.getElementById('menuImportList'),
   menuImportCancel: document.getElementById('menuImportCancel'),
@@ -1718,35 +1721,56 @@ function closeGrupReview(){
   state.editingGrup = null;
 }
 
-// -- Export catalog JSON --
-els.exportCatalogBtn.addEventListener('click', function(){
-  if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
-  var payload = {
-    sourceFile: state.fileName + '.pdf',
+// -- Export JSON (one file per conjunt) --
+function sanitizeFn(s){ return (s||'').toString().trim().replace(/[\/\\:*?"<>|]/g,'_').replace(/\s+/g,'_'); }
+function conjuntPayload(c){
+  return {
     exportedAt: new Date().toISOString(),
+    sourceFile: state.fileName + '.pdf',
     machine: state.machine,
     portadaPage: state.portadaPage,
-    conjunts: state.conjunts.map(function(c){
-      return {
-        name: c.name,
-        num: c.num || '',
-        grups: c.grups.map(function(g){
-          return {name:g.name, pages:g.pages, subgrups:(g.subgrups||[]).map(function(sg){
-            return {name:sg.name, rows:sg.rows};
-          })};
-        })
-      };
-    })
+    conjunt: {
+      name: c.name,
+      num: c.num || '',
+      grups: c.grups.map(function(g){
+        return {name:g.name, pages:g.pages, subgrups:(g.subgrups||[]).map(function(sg){
+          return {name:sg.name, rows:sg.rows};
+        })};
+      })
+    }
   };
-  var blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+}
+function downloadJson(obj, filename){
+  var blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
-  a.href = url;
-  a.download = state.fileName + '_catalog.json';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+}
+// {núm màquina}_{núm conjunt}_recanvis.json — fall back to name/index when a
+// piece is missing so files never collide.
+function conjuntFileName(c, idx){
+  var serial = sanitizeFn(state.machine.serial) || 'maquina';
+  var num = sanitizeFn(c.num) || sanitizeFn(c.name) || ('conjunt' + ((idx||0)+1));
+  return serial + '_' + num + '_recanvis.json';
+}
+function exportConjunt(c, idx){
+  downloadJson(conjuntPayload(c), conjuntFileName(c, idx));
+}
+els.exportConjuntBtn.addEventListener('click', function(){
+  var c = state.conjunts.find(function(x){ return x.id === state.currentConjuntId; });
+  if(!c){ showToast('Cap conjunt obert.'); return; }
+  var idx = state.conjunts.indexOf(c);
+  exportConjunt(c, idx);
+  showToast('Exportat: ' + conjuntFileName(c, idx));
+});
+els.exportCatalogBtn.addEventListener('click', function(){
+  if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
+  // one download per conjunt, slightly staggered so the browser doesn't drop
+  // rapid sequential downloads
+  state.conjunts.forEach(function(c, i){ setTimeout(function(){ exportConjunt(c, i); }, i * 400); });
+  showToast(state.conjunts.length + (state.conjunts.length===1?' fitxer exportat.':' fitxers exportats.'));
 });
 
 // ---- Export ----
