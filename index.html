@@ -892,7 +892,10 @@ function extractSubgrupFromPage(page){
 function extractSubgrupNumFromPage(page){
   return getPageLines(page).then(function(lines){
     for(var i=0;i<lines.length;i++){
-      var m = lines[i].match(/[A-Z]-\d+\s+(\d{4}-\d{2}-\d{2})/);
+      // The code after the DIN paper-size prefix (e.g. "A-4 …"). Capture a
+      // dash-separated code whose segments may be letters and/or digits
+      // ("4726-01-00", "ZO-200-95", "AB-1234-01"), not just all-digit ones.
+      var m = lines[i].match(/[A-Z]-\d+\s+([A-Z0-9]+(?:-[A-Z0-9]+)+)/);
       if(m) return m[1];
     }
     return '';
