@@ -85,8 +85,9 @@
   #modalTop{display:flex; align-items:center; gap:16px; color:var(--text); margin-bottom:10px; flex-wrap:wrap;}
   #modalPickHint{display:none; background:var(--accent2); color:#fff; padding:6px 12px; border-radius:6px; font-size:13px;}
   #modalImgWrap.picking canvas{cursor:crosshair;}
-  #modalImgWrap{max-width:92vw; max-height:78vh; overflow:auto; background:#0a0b0e; border-radius:8px;}
+  #modalImgWrap{max-width:92vw; max-height:78vh; overflow:auto; background:#0a0b0e; border-radius:8px; position:relative;}
   #modalImgWrap canvas{display:block; max-width:none;}
+  #pickRect{position:absolute; border:1.5px dashed var(--accent); background:rgba(79,140,255,.18); display:none; pointer-events:none; z-index:5;}
   #modalOverlay button{padding:8px 14px;}
   .placeholder{color:var(--muted); font-size:24px;}
   #emptyState{display:none; text-align:center; color:var(--muted); padding:60px 20px;}
@@ -260,9 +261,9 @@
     <button id="modalToggle">Selecciona aquesta pàgina</button>
     <button id="modalPortadaBtn">Marca com a portada</button>
     <button id="modalClose">Tanca ✕</button>
-    <span id="modalPickHint">🎯 Clica el text del nom al dibuix (Esc per cancel·lar)</span>
+    <span id="modalPickHint">🎯 Arrossega el ratolí sobre el text que vols (Esc per cancel·lar)</span>
   </div>
-  <div id="modalImgWrap"><canvas id="modalCanvas"></canvas></div>
+  <div id="modalImgWrap"><canvas id="modalCanvas"></canvas><div id="pickRect"></div></div>
 </div>
 
 <div class="overlay" id="nameModalOverlay">
@@ -432,6 +433,7 @@ var els = {
   addSubgrupBtn: document.getElementById('addSubgrupBtn'),
   modalPickHint: document.getElementById('modalPickHint'),
   modalImgWrap: document.getElementById('modalImgWrap'),
+  pickRect: document.getElementById('pickRect'),
   reviewPagesLabel: document.getElementById('reviewPagesLabel'),
   reviewPendingPanel: document.getElementById('reviewPendingPanel'),
   assignPagesBtn: document.getElementById('assignPagesBtn'),
@@ -458,7 +460,7 @@ var state = {
   editingGrup: null,
   pendingMenuImport: null,
   pickingTarget: null, // callback(text) while picking a name from the drawing
-  pickLines: []        // clickable text-line geometry for the current modal page
+  pickItems: []        // per-item text geometry (canvas space) for the current modal page
 };
 
 function showToast(msg, ms){
@@ -742,66 +744,127 @@ function renderModalPage(page){
     var ctx = els.modalCanvas.getContext('2d');
     var renderP = pdfPage.render({canvasContext: ctx, viewport: viewport}).promise;
     if(state.pickingTarget){
-      pdfPage.getTextContent().then(function(tc){ state.pickLines = buildPickLines(tc, viewport); });
+      pdfPage.getTextContent().then(function(tc){ state.pickItems = buildPickItems(tc, viewport); });
     }
     return renderP;
   });
 }
-// Reconstructs clickable text lines (with canvas geometry) for name-picking:
-// groups pdf.js text items into lines by their PDF y, and records each line's
-// canvas y (cy) + height (ch) so a click can be matched to the line under it.
-function buildPickLines(tc, viewport){
-  var lines = [];
+// Per-item text geometry in CANVAS space for name-picking. Each pdf.js text
+// item gets its own box (x, y, w, h) so selection respects the horizontal
+// position too — matching by line height alone grabbed text from anywhere on
+// the same horizontal band of the sheet (dimensions, labels, title block).
+function buildPickItems(tc, viewport){
+  var items = [];
   tc.items.forEach(function(it){
     if(!it.str || !it.str.trim()) return;
-    var y = it.transform[5], line = null;
-    for(var i=0;i<lines.length;i++){ if(Math.abs(lines[i].py - y) < 3){ line = lines[i]; break; } }
-    if(!line){
-      var t = pdfjsLib.Util.transform(viewport.transform, it.transform);
-      line = { py:y, cy:t[5], ch:Math.hypot(t[2],t[3]) || 12, items:[] };
-      lines.push(line);
-    }
-    line.items.push({ x: it.transform[4], w: it.width || 0, str: it.str });
+    var t = pdfjsLib.Util.transform(viewport.transform, it.transform);
+    var fh = Math.hypot(t[2], t[3]) || 12;              // font height on canvas
+    var w = (it.width || 0) * viewport.scale;            // item width on canvas
+    items.push({ x: t[4], y: t[5] - fh, w: w, h: fh * 1.25, str: it.str,
+                 px: it.transform[4], py: it.transform[5], pw: it.width || 0 });
   });
-  return lines.map(function(l){
-    l.items.sort(function(a,b){ return a.x - b.x; });
-    var text = '', prevEnd = null;
-    l.items.forEach(function(it){ if(prevEnd !== null && (it.x - prevEnd) > 1) text += ' '; text += it.str; prevEnd = it.x + it.w; });
-    return { cy:l.cy, ch:l.ch, text: text.replace(/\s+/g,' ').trim() };
-  }).filter(function(l){ return l.text; });
+  return items;
 }
-// Opens `page` in the modal in name-picking mode; the next text line the user
-// clicks is passed to cb(text). Falls back with a toast if there's no page.
+// Joins the selected items back into readable text: lines top-to-bottom,
+// items left-to-right, inserting spaces only across real visual gaps (same
+// rule as getPageLines, so split words aren't broken apart).
+function composeItemsText(sel){
+  var lines = [];
+  sel.forEach(function(it){
+    var line = null;
+    for(var i=0;i<lines.length;i++){ if(Math.abs(lines[i].py - it.py) < 3){ line = lines[i]; break; } }
+    if(!line){ line = {py: it.py, items: []}; lines.push(line); }
+    line.items.push(it);
+  });
+  lines.sort(function(a,b){ return b.py - a.py; });
+  return lines.map(function(l){
+    l.items.sort(function(a,b){ return a.px - b.px; });
+    var text = '', prevEnd = null;
+    l.items.forEach(function(it){
+      if(prevEnd !== null && (it.px - prevEnd) > 1) text += ' ';
+      text += it.str;
+      prevEnd = it.px + it.pw;
+    });
+    return text;
+  }).join(' ').replace(/\s+/g,' ').trim();
+}
+// Opens `page` in the modal in name-picking mode: drag a rectangle over the
+// text you want (or plain-click a single item) and the selection is passed to
+// cb(text). Falls back with a toast if there's no page.
 function startPicking(page, cb){
   if(!page){ showToast('Aquest element encara no té cap pàgina d\'on triar el text.'); return; }
   state.pickingTarget = cb;
-  state.pickLines = [];
+  state.pickItems = [];
   els.modalPickHint.style.display = 'inline-block';
   els.modalImgWrap.classList.add('picking');
   openModal(page);
 }
 function endPicking(){
   state.pickingTarget = null;
-  state.pickLines = [];
+  state.pickItems = [];
+  pickDrag = null;
+  els.pickRect.style.display = 'none';
   els.modalPickHint.style.display = 'none';
   els.modalImgWrap.classList.remove('picking');
 }
-els.modalCanvas.addEventListener('click', function(e){
-  if(!state.pickingTarget) return;
-  var rect = els.modalCanvas.getBoundingClientRect();
-  var scaleY = rect.height ? (els.modalCanvas.height / rect.height) : 1;
-  var cy = (e.clientY - rect.top) * scaleY;
-  var best = null, bestD = 1e9;
-  state.pickLines.forEach(function(l){ var d = Math.abs(l.cy - cy); if(d < bestD){ bestD = d; best = l; } });
-  if(best && bestD < best.ch * 1.5 + 12){
-    var cb = state.pickingTarget;
-    endPicking();
-    closeModal();
-    cb(best.text);
-    showToast('Nom triat: ' + best.text);
+// -- drag-rectangle selection (display-space coords relative to the canvas;
+//    converted to canvas-internal space only for hit-testing) --
+var pickDrag = null;
+function updatePickRect(){
+  var d = pickDrag; if(!d) return;
+  var ox = els.modalCanvas.offsetLeft, oy = els.modalCanvas.offsetTop;
+  els.pickRect.style.display = 'block';
+  els.pickRect.style.left = (ox + Math.min(d.x0, d.x1)) + 'px';
+  els.pickRect.style.top = (oy + Math.min(d.y0, d.y1)) + 'px';
+  els.pickRect.style.width = Math.abs(d.x1 - d.x0) + 'px';
+  els.pickRect.style.height = Math.abs(d.y1 - d.y0) + 'px';
+}
+els.modalCanvas.addEventListener('mousedown', function(e){
+  if(!state.pickingTarget || e.button !== 0) return;
+  e.preventDefault();
+  var r = els.modalCanvas.getBoundingClientRect();
+  var x = e.clientX - r.left, y = e.clientY - r.top;
+  pickDrag = { x0:x, y0:y, x1:x, y1:y };
+  updatePickRect();
+});
+document.addEventListener('mousemove', function(e){
+  if(!pickDrag) return;
+  var r = els.modalCanvas.getBoundingClientRect();
+  pickDrag.x1 = Math.max(0, Math.min(e.clientX - r.left, r.width));
+  pickDrag.y1 = Math.max(0, Math.min(e.clientY - r.top, r.height));
+  updatePickRect();
+});
+document.addEventListener('mouseup', function(){
+  if(!pickDrag || !state.pickingTarget) { pickDrag = null; return; }
+  var d = pickDrag; pickDrag = null;
+  els.pickRect.style.display = 'none';
+  var r = els.modalCanvas.getBoundingClientRect();
+  var sx = r.width ? els.modalCanvas.width / r.width : 1;
+  var sy = r.height ? els.modalCanvas.height / r.height : 1;
+  var x0 = Math.min(d.x0, d.x1) * sx, x1 = Math.max(d.x0, d.x1) * sx;
+  var y0 = Math.min(d.y0, d.y1) * sy, y1 = Math.max(d.y0, d.y1) * sy;
+  var isClick = (x1 - x0) < 6 && (y1 - y0) < 6;
+  var sel;
+  if(isClick){
+    var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, tol = 4;
+    sel = state.pickItems.filter(function(it){
+      return cx >= it.x - tol && cx <= it.x + it.w + tol && cy >= it.y - tol && cy <= it.y + it.h + tol;
+    });
   } else {
-    showToast('Cap text just aquí — clica sobre una línia de text.');
+    sel = state.pickItems.filter(function(it){
+      return it.x < x1 && it.x + it.w > x0 && it.y < y1 && it.y + it.h > y0;
+    });
   }
+  if(!sel.length){
+    showToast(isClick ? 'Cap text just aquí — arrossega un requadre sobre el text.' : 'Cap text dins la selecció.');
+    return;
+  }
+  var text = composeItemsText(sel);
+  var cb = state.pickingTarget;
+  endPicking();
+  closeModal();
+  cb(text);
+  showToast('Text triat: ' + text);
 });
 function updateModalToggleLabel(){
   els.modalToggle.textContent = state.selected.has(state.modalPage)
