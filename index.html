@@ -234,6 +234,7 @@
 <div id="conjuntsPanel">
   <div id="conjuntsPanelHeader">
     <strong>Conjunts</strong>
+    <button id="exportCombinedBtn">Exporta tots (un sol JSON)</button>
     <button id="exportCatalogBtn">Exporta tots (un JSON per conjunt)</button>
   </div>
   <div id="conjuntChipsList"></div>
@@ -411,6 +412,7 @@ var els = {
   modalPortadaBtn: document.getElementById('modalPortadaBtn'),
   conjuntsPanel: document.getElementById('conjuntsPanel'),
   conjuntChipsList: document.getElementById('conjuntChipsList'),
+  exportCombinedBtn: document.getElementById('exportCombinedBtn'),
   exportCatalogBtn: document.getElementById('exportCatalogBtn'),
   nameModalOverlay: document.getElementById('nameModalOverlay'),
   nameModalLabel: document.getElementById('nameModalLabel'),
@@ -1106,6 +1108,20 @@ function extractCodeFromLine(text){
   m = (text||'').match(/([A-Z0-9]+(?:-[A-Z0-9]+)+)/);
   return m ? m[1] : (text||'').trim();
 }
+// Parts within a drawing are numbered by their position on the sheet; the raw
+// text stream returns them in reading order, which isn't necessarily 1,2,3…
+// Sort each list by the numeric Pos. value ascending so the extracted rows
+// follow the drawing's own numbering. Non-numeric or blank Pos. values sink to
+// the bottom keeping their original relative order (Array.sort is stable).
+function posSortKey(v){
+  var n = parseFloat(String(v == null ? '' : v).replace(',', '.'));
+  return isNaN(n) ? Infinity : n;
+}
+function sortRowsByPos(rows){
+  rows.sort(function(a, b){ return posSortKey(a.pos) - posSortKey(b.pos); });
+  return rows;
+}
+
 // Builds the Subgrup containers for a set of pages: one per page, named after
 // the page's own SUBGRUPO title-block field, holding that page's part rows.
 // Consecutive pages with the same subgrup name are merged into one subgrup
@@ -1122,6 +1138,7 @@ function buildSubgrupsForPages(pages){
       if(last && last.name === pp.name){ last.rows = last.rows.concat(pp.rows); }
       else subs.push({ id: uid(), name: pp.name, rows: pp.rows });
     });
+    subs.forEach(function(sg){ sortRowsByPos(sg.rows); });
     return subs;
   });
 }
@@ -1727,22 +1744,43 @@ function closeGrupReview(){
 
 // -- Export JSON (one file per conjunt) --
 function sanitizeFn(s){ return (s||'').toString().trim().replace(/[\/\\:*?"<>|]/g,'_').replace(/\s+/g,'_'); }
+function serializeConjunt(c){
+  return {
+    name: c.name,
+    num: c.num || '',
+    grups: c.grups.map(function(g){
+      return {name:g.name, pages:g.pages, subgrups:(g.subgrups||[]).map(function(sg){
+        return {name:sg.name, rows:sg.rows};
+      })};
+    })
+  };
+}
 function conjuntPayload(c){
   return {
     exportedAt: new Date().toISOString(),
     sourceFile: state.fileName + '.pdf',
     machine: state.machine,
     portadaPage: state.portadaPage,
-    conjunt: {
-      name: c.name,
-      num: c.num || '',
-      grups: c.grups.map(function(g){
-        return {name:g.name, pages:g.pages, subgrups:(g.subgrups||[]).map(function(sg){
-          return {name:sg.name, rows:sg.rows};
-        })};
-      })
-    }
+    conjunt: serializeConjunt(c)
   };
+}
+// Whole-catalog payload: every conjunt in a single file. importCatalogJson
+// already reads this {conjunts:[…]} shape, so the combined export round-trips.
+function catalogPayload(){
+  return {
+    exportedAt: new Date().toISOString(),
+    sourceFile: state.fileName + '.pdf',
+    machine: state.machine,
+    portadaPage: state.portadaPage,
+    conjunts: state.conjunts.map(serializeConjunt)
+  };
+}
+// Same base name as the source PDF (…/Foo.pdf → Foo.json) so the exported
+// catalog stays visibly paired with the manual it came from. Uses the raw
+// file name (already a valid filesystem name) rather than sanitizing it, so
+// the two names match exactly.
+function catalogFileName(){
+  return (state.fileName || 'recanvis') + '.json';
 }
 function downloadJson(obj, filename){
   var blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
@@ -1768,6 +1806,12 @@ els.exportConjuntBtn.addEventListener('click', function(){
   var idx = state.conjunts.indexOf(c);
   exportConjunt(c, idx);
   showToast('Exportat: ' + conjuntFileName(c, idx));
+});
+els.exportCombinedBtn.addEventListener('click', function(){
+  if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
+  var fn = catalogFileName();
+  downloadJson(catalogPayload(), fn);
+  showToast('Exportat: ' + fn + ' (' + state.conjunts.length + (state.conjunts.length===1?' conjunt)':' conjunts)'));
 });
 els.exportCatalogBtn.addEventListener('click', function(){
   if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
