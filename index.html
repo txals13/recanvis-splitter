@@ -167,9 +167,13 @@
   .rmRowBtn{width:26px; height:26px; padding:0; color:var(--danger); border-color:var(--border);}
   .subgrupBox{border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:12px; background:var(--panel2);}
   .subgrupHdr{display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;}
-  .subgrupHdr .sgLabel{font-size:12px; color:var(--muted);}
-  .subgrupHdr input{width:260px;}
+  .subgrupHdr .sgLabel{font-size:12px; color:var(--muted); min-width:52px;}
+  .subgrupHdr input{width:220px;}
+  .subgrupHdr input.sgNum{width:120px;}
   .subgrupHdr .sgDel{color:var(--danger); margin-left:auto;}
+  .sgPagesRow{display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;}
+  .sgPagesRow input.sgPages{width:120px;}
+  .sgPagesRow .sgHint{font-size:11px; color:var(--muted);}
   .reviewActions{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
   .reviewActions .left{display:flex; gap:8px;}
   .reviewActions .right{display:flex; gap:8px;}
@@ -333,7 +337,7 @@
     </div>
     <div class="reviewThumbs" id="reviewThumbs"></div>
     <div id="subgrupsList"></div>
-    <button id="addSubgrupBtn">+ Afegeix subgrup</button>
+    <button id="addSubgrupBtn">+ Afegeix dibuix</button>
     <div class="reviewActions" style="margin-top:16px;">
       <div class="left">
         <button id="deleteGrupBtn">Elimina el grup</button>
@@ -468,7 +472,8 @@ var state = {
   currentConjuntId: null,
   editingGrup: null,
   pendingMenuImport: null,
-  pickingTarget: null, // callback(text) while picking a name from the drawing
+  pickingTarget: null, // callback while picking from the drawing
+  pickingMode: 'text', // 'text' (name / number) | 'rows' (mark parts-list rows)
   pickItems: []        // per-item text geometry (canvas space) for the current modal page
 };
 
@@ -774,10 +779,10 @@ function buildPickItems(tc, viewport){
   });
   return items;
 }
-// Joins the selected items back into readable text: lines top-to-bottom,
-// items left-to-right, inserting spaces only across real visual gaps (same
-// rule as getPageLines, so split words aren't broken apart).
-function composeItemsText(sel){
+// Groups the selected items into reading-order LINES: top-to-bottom, items
+// left-to-right, inserting spaces only across real visual gaps (same rule as
+// getPageLines, so split words aren't broken apart).
+function composeItemsLines(sel){
   var lines = [];
   sel.forEach(function(it){
     var line = null;
@@ -794,22 +799,32 @@ function composeItemsText(sel){
       text += it.str;
       prevEnd = it.px + it.pw;
     });
-    return text;
-  }).join(' ').replace(/\s+/g,' ').trim();
+    return text.replace(/\s+/g,' ').trim();
+  }).filter(Boolean);
 }
-// Opens `page` in the modal in name-picking mode: drag a rectangle over the
-// text you want (or plain-click a single item) and the selection is passed to
-// cb(text). Falls back with a toast if there's no page.
-function startPicking(page, cb){
+// One readable string (used when picking a name / a number).
+function composeItemsText(sel){ return composeItemsLines(sel).join(' ').replace(/\s+/g,' ').trim(); }
+// Opens `page` in the modal in picking mode: drag a rectangle over what you
+// want (or plain-click a single item).
+//   mode 'text' (default) — one drag, cb(text), then the modal closes.
+//   mode 'rows'           — each drag calls cb(lines[], page) and picking STAYS
+//                           on, so you can mark several regions / pages; Esc or
+//                           closing the modal finishes.
+function startPicking(page, cb, mode){
   if(!page){ showToast('Aquest element encara no té cap pàgina d\'on triar el text.'); return; }
   state.pickingTarget = cb;
+  state.pickingMode = mode || 'text';
   state.pickItems = [];
+  els.modalPickHint.textContent = (state.pickingMode === 'rows')
+    ? '🎯 Arrossega sobre les FILES de recanvis (pots repetir i canviar de pàgina) — Esc per acabar'
+    : '🎯 Arrossega el ratolí sobre el text que vols (Esc per cancel·lar)';
   els.modalPickHint.style.display = 'inline-block';
   els.modalImgWrap.classList.add('picking');
   openModal(page);
 }
 function endPicking(){
   state.pickingTarget = null;
+  state.pickingMode = 'text';
   state.pickItems = [];
   pickDrag = null;
   els.pickRect.style.display = 'none';
@@ -866,6 +881,13 @@ document.addEventListener('mouseup', function(){
   }
   if(!sel.length){
     showToast(isClick ? 'Cap text just aquí — arrossega un requadre sobre el text.' : 'Cap text dins la selecció.');
+    return;
+  }
+  // 'rows' mode stays open: each drag hands over the marked lines so you can
+  // mark several regions (and pages) into the same drawing.
+  if(state.pickingMode === 'rows'){
+    var lines = composeItemsLines(sel);
+    state.pickingTarget(lines, state.modalPage);
     return;
   }
   var text = composeItemsText(sel);
@@ -989,16 +1011,29 @@ function normalizeConjunts(conjunts){
   (conjunts||[]).forEach(function(c){
     if(c.num === undefined || c.num === null) c.num = '';
     (c.grups||[]).forEach(function(g){
-      if(g.subgrups) return; // already migrated
-      var subs = [], byName = {};
-      (g.rows||[]).forEach(function(r){
-        if(!c.num && r.subgrupNum) c.num = r.subgrupNum;
-        var key = r.subgrup || '';
-        if(!byName[key]){ byName[key] = {id:uid(), name:key, rows:[]}; subs.push(byName[key]); }
-        byName[key].rows.push({pos:r.pos||'', ref:r.ref||'', cant:r.cant||'', denominacio:r.denominacio||'', page:r.page});
+      if(!g.subgrups){
+        var subs = [], byName = {};
+        (g.rows||[]).forEach(function(r){
+          var key = r.subgrup || '';
+          if(!byName[key]){ byName[key] = {id:uid(), name:key, num:r.subgrupNum||'', rows:[]}; subs.push(byName[key]); }
+          if(!byName[key].num && r.subgrupNum) byName[key].num = r.subgrupNum;
+          if(!c.num && r.subgrupNum) c.num = r.subgrupNum;
+          byName[key].rows.push({pos:r.pos||'', ref:r.ref||'', cant:r.cant||'', denominacio:r.denominacio||'', page:r.page});
+        });
+        g.subgrups = subs;
+        delete g.rows;
+      }
+      // Each Dibuix needs its own Nº + explicit page range. Catalogs built
+      // before those existed get a block range derived from their rows, so
+      // they work without re-extracting (and stay editable by hand).
+      var needBlocks = (g.subgrups||[]).some(function(sg){ return !Array.isArray(sg.pages) || !sg.pages.length; });
+      (g.subgrups||[]).forEach(function(sg){
+        if(sg.num === undefined || sg.num === null) sg.num = '';
+        if(!Array.isArray(sg.pages)) sg.pages = [];
+        sg.srcPages = sg.rows.map(function(r){ return r.page; }).filter(function(p){ return p != null; });
       });
-      g.subgrups = subs;
-      delete g.rows;
+      if(needBlocks) assignBlockPages(g.subgrups||[], (g.pages||[]).slice());
+      (g.subgrups||[]).forEach(function(sg){ delete sg.srcPages; });
     });
   });
   return conjunts;
@@ -1122,24 +1157,52 @@ function sortRowsByPos(rows){
   return rows;
 }
 
-// Builds the Subgrup containers for a set of pages: one per page, named after
-// the page's own SUBGRUPO title-block field, holding that page's part rows.
-// Consecutive pages with the same subgrup name are merged into one subgrup
-// (drawings whose parts list spans several sheets).
+// Builds the Dibuix (subgrup) containers for a set of pages: one per page,
+// named after the page's own SUBGRUPO title-block field and tagged with that
+// sheet's Nº, holding that page's part rows. Consecutive pages with the same
+// name are merged into one drawing (a parts list spanning several sheets).
+// Everything here is only a STARTING POINT — name, Nº, pages and rows are all
+// editable/markable by hand in the review modal.
 function buildSubgrupsForPages(pages){
   return Promise.all(pages.map(function(p){
-    return Promise.all([extractRowsFromPage(p), extractSubgrupFromPage(p)]).then(function(res){
-      return { name: stripTitleLabel(res[1] || ''), rows: res[0] };
+    return Promise.all([extractRowsFromPage(p), extractSubgrupFromPage(p), extractSubgrupNumFromPage(p)]).then(function(res){
+      return { page: p, name: stripTitleLabel(res[1] || ''), num: res[2] || '', rows: res[0] };
     });
   })).then(function(perPage){
     var subs = [];
     perPage.forEach(function(pp){
       var last = subs[subs.length-1];
-      if(last && last.name === pp.name){ last.rows = last.rows.concat(pp.rows); }
-      else subs.push({ id: uid(), name: pp.name, rows: pp.rows });
+      if(last && last.name === pp.name){ last.rows = last.rows.concat(pp.rows); last.srcPages.push(pp.page); if(!last.num) last.num = pp.num; }
+      else subs.push({ id: uid(), name: pp.name, num: pp.num, rows: pp.rows, srcPages: [pp.page] });
     });
     subs.forEach(function(sg){ sortRowsByPos(sg.rows); });
+    assignBlockPages(subs, pages);
+    subs.forEach(function(sg){ delete sg.srcPages; });
     return subs;
+  });
+}
+// In this manual a drawing is laid out as: the drawing sheet first, then its
+// parts lists, until the next drawing starts. So each drawing's page range runs
+// from just after the previous drawing's last list page through its own last
+// list page — that way the sheet carrying the balloons is inside the range.
+// Drawings with no rows of their own keep just the pages they came from.
+function assignBlockPages(subs, allPages){
+  var sorted = allPages.slice().sort(function(a,b){ return a-b; });
+  var gStart = sorted.length ? sorted[0] : null, cursor = null;
+  subs.forEach(function(sg){
+    var src = (sg.srcPages || []).slice().sort(function(a,b){ return a-b; });
+    var rowPages = sg.rows.map(function(r){ return r.page; }).filter(function(p){ return p != null; });
+    var last = rowPages.length ? Math.max.apply(null, rowPages) : (src.length ? src[src.length-1] : null);
+    var first = rowPages.length ? Math.min.apply(null, rowPages) : (src.length ? src[0] : null);
+    if(last == null){ if(!sg.pages || !sg.pages.length) sg.pages = src; return; }
+    var start = (cursor != null) ? cursor + 1 : (gStart != null ? Math.min(gStart, first) : first);
+    if(start > first) start = first;
+    if(!sg.pages || !sg.pages.length){ // never clobber a range set by hand
+      var pages = [];
+      for(var p = start; p <= last; p++) pages.push(p);
+      sg.pages = pages;
+    }
+    cursor = last;
   });
 }
 
@@ -1609,8 +1672,39 @@ els.assignPagesBtn.addEventListener('click', function(){
   });
 });
 
-// One box per Subgrup: editable name (typed or picked from the drawing) +
-// its own rows table (Pos, Ref, Cant, Denominació) + add-row.
+// "2,3,4,5,6,9" -> "2-6, 9"  and back, for the per-drawing page range field.
+function pagesToRangeStr(pages){
+  var p = (pages||[]).slice().sort(function(a,b){ return a-b; });
+  if(!p.length) return '';
+  var out = [], start = p[0], prev = p[0];
+  for(var i=1;i<=p.length;i++){
+    var cur = p[i];
+    if(cur !== prev+1){ out.push(start === prev ? String(start) : (start+'-'+prev)); start = cur; }
+    prev = cur;
+  }
+  return out.join(', ');
+}
+function rangeStrToPages(str){
+  var out = [];
+  (str||'').split(',').forEach(function(part){
+    part = part.trim(); if(!part) return;
+    var m = part.match(/^(\d+)\s*-\s*(\d+)$/);
+    if(m){ var a = parseInt(m[1],10), b = parseInt(m[2],10); if(a>b){ var t=a; a=b; b=t; } for(var p=a;p<=b;p++) out.push(p); }
+    else if(/^\d+$/.test(part)) out.push(parseInt(part,10));
+  });
+  return out.filter(function(v,i,arr){ return arr.indexOf(v) === i; }).sort(function(a,b){ return a-b; });
+}
+// The sheet to open when picking from this drawing: its first page (the drawing
+// sheet itself, since the range starts there), else where its rows came from.
+function firstPageOf(sg, eg){
+  if(sg.pages && sg.pages.length) return sg.pages[0];
+  if(sg.rows && sg.rows.length && sg.rows[0].page) return sg.rows[0].page;
+  return (eg && eg.pages && eg.pages[0]) || null;
+}
+
+// One box per Dibuix: name + Nº (typed or picked from the sheet), its explicit
+// page range (the drawing sheet + its lists), and its rows table — auto-filled
+// as a starting point, then markable/editable by hand.
 function renderSubgrupsList(){
   var eg = state.editingGrup;
   els.subgrupsList.innerHTML = '';
@@ -1618,23 +1712,51 @@ function renderSubgrupsList(){
     var box = document.createElement('div'); box.className = 'subgrupBox';
 
     var hdr = document.createElement('div'); hdr.className = 'subgrupHdr';
-    var lab = document.createElement('span'); lab.className = 'sgLabel'; lab.textContent = 'Subgrup';
+    var lab = document.createElement('span'); lab.className = 'sgLabel'; lab.textContent = 'Dibuix';
     var inName = document.createElement('input'); inName.type = 'text';
-    inName.placeholder = 'Nom del subgrup'; inName.value = sg.name || '';
+    inName.placeholder = 'Nom del dibuix'; inName.value = sg.name || '';
     inName.addEventListener('input', function(){ sg.name = inName.value; });
-    var pickBtn = document.createElement('button'); pickBtn.textContent = '🎯';
-    pickBtn.title = 'Tria el nom del subgrup clicant-lo al dibuix';
-    pickBtn.addEventListener('click', function(){
-      var page = (sg.rows.length && sg.rows[0].page) || eg.pages[0];
-      startPicking(page, function(text){ sg.name = stripTitleLabel(text); renderSubgrupsList(); });
+    var pickName = document.createElement('button'); pickName.textContent = '🎯 Nom';
+    pickName.title = 'Tria el nom arrossegant un requadre sobre el full';
+    pickName.addEventListener('click', function(){
+      startPicking(firstPageOf(sg, eg), function(text){ sg.name = stripTitleLabel(text); renderSubgrupsList(); });
     });
-    var delBtn = document.createElement('button'); delBtn.className = 'sgDel'; delBtn.textContent = '✕ subgrup';
+    var inNum = document.createElement('input'); inNum.type = 'text'; inNum.className = 'sgNum';
+    inNum.placeholder = 'Nº'; inNum.value = sg.num || '';
+    inNum.addEventListener('input', function(){ sg.num = inNum.value.trim(); });
+    var pickNum = document.createElement('button'); pickNum.textContent = '🎯 Nº';
+    pickNum.title = 'Tria el Nº arrossegant sobre el requadre inferior dret';
+    pickNum.addEventListener('click', function(){
+      startPicking(firstPageOf(sg, eg), function(text){ sg.num = extractCodeFromLine(text); renderSubgrupsList(); });
+    });
+    var delBtn = document.createElement('button'); delBtn.className = 'sgDel'; delBtn.textContent = '✕ dibuix';
     delBtn.addEventListener('click', function(){
       eg.subgrups.splice(sgIdx, 1);
       renderSubgrupsList();
     });
-    hdr.appendChild(lab); hdr.appendChild(inName); hdr.appendChild(pickBtn); hdr.appendChild(delBtn);
+    hdr.appendChild(lab); hdr.appendChild(inName); hdr.appendChild(pickName);
+    hdr.appendChild(inNum); hdr.appendChild(pickNum); hdr.appendChild(delBtn);
     box.appendChild(hdr);
+
+    // -- explicit page range: the drawing sheet + its list pages --
+    var pRow = document.createElement('div'); pRow.className = 'sgPagesRow';
+    var pLab = document.createElement('span'); pLab.className = 'sgLabel'; pLab.textContent = 'Pàgines';
+    var inPages = document.createElement('input'); inPages.type = 'text'; inPages.className = 'sgPages';
+    inPages.placeholder = 'ex: 2-6'; inPages.value = pagesToRangeStr(sg.pages);
+    inPages.addEventListener('change', function(){ sg.pages = rangeStrToPages(inPages.value); renderSubgrupsList(); });
+    var nSel = state.selected.size;
+    var useSel = document.createElement('button');
+    useSel.textContent = nSel ? ('Assigna la selecció (' + nSel + ')') : 'Assigna la selecció';
+    useSel.disabled = !nSel;
+    useSel.title = 'Fa servir les pàgines marcades a la graella';
+    useSel.addEventListener('click', function(){
+      sg.pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
+      renderSubgrupsList();
+    });
+    var pHint = document.createElement('span'); pHint.className = 'sgHint';
+    pHint.textContent = 'el full del dibuix + les seves llistes';
+    pRow.appendChild(pLab); pRow.appendChild(inPages); pRow.appendChild(useSel); pRow.appendChild(pHint);
+    box.appendChild(pRow);
 
     var table = document.createElement('table'); table.className = 'rowsTable';
     table.innerHTML = '<thead><tr><th class="posCol">Pos.</th><th class="refCol">Ref.</th>'
@@ -1662,13 +1784,42 @@ function renderSubgrupsList(){
     table.appendChild(tbody);
     box.appendChild(table);
 
+    // Mark the real rows by dragging over the parts table — only what you
+    // select is parsed, so none of the page's other text leaks in. Picking
+    // stays on, so you can mark several regions and pages into this drawing.
+    var markBtn = document.createElement('button'); markBtn.textContent = '🎯 Marca les files';
+    markBtn.title = 'Arrossega un requadre sobre la taula de recanvis del full';
+    markBtn.addEventListener('click', function(){
+      startPicking(firstPageOf(sg, eg), function(lines, page){
+        var added = 0;
+        lines.forEach(function(l){
+          var r = parseLineToRow(l, page);
+          if(r.pos || r.ref){ sg.rows.push(r); added++; }
+        });
+        sortRowsByPos(sg.rows);
+        renderSubgrupsList();
+        showToast(added ? (added + (added===1?' fila afegida.':' files afegides.')) : 'Cap fila reconeguda en aquesta selecció.');
+      }, 'rows');
+    });
+    box.appendChild(markBtn);
+
     var addRow = document.createElement('button'); addRow.textContent = '+ Afegeix fila';
     addRow.addEventListener('click', function(){
-      var lastPage = sg.rows.length ? sg.rows[sg.rows.length-1].page : (eg.pages[0] || null);
+      var lastPage = sg.rows.length ? sg.rows[sg.rows.length-1].page : firstPageOf(sg, eg);
       sg.rows.push({pos:'', ref:'', cant:'', denominacio:'', page: lastPage});
       renderSubgrupsList();
     });
     box.appendChild(addRow);
+
+    if(sg.rows.length){
+      var clrBtn = document.createElement('button'); clrBtn.textContent = 'Buida les files';
+      clrBtn.style.marginLeft = '8px';
+      clrBtn.addEventListener('click', function(){
+        if(!confirm('Esborrar les ' + sg.rows.length + ' files d\'aquest dibuix?')) return;
+        sg.rows = []; renderSubgrupsList();
+      });
+      box.appendChild(clrBtn);
+    }
 
     els.subgrupsList.appendChild(box);
   });
@@ -1677,7 +1828,7 @@ function renderSubgrupsList(){
 els.addSubgrupBtn.addEventListener('click', function(){
   var eg = state.editingGrup;
   if(!eg) return;
-  eg.subgrups.push({id: uid(), name: '', rows: []});
+  eg.subgrups.push({id: uid(), name: '', num: '', pages: [], rows: []});
   renderSubgrupsList();
 });
 
@@ -1750,7 +1901,9 @@ function serializeConjunt(c){
     num: c.num || '',
     grups: c.grups.map(function(g){
       return {name:g.name, pages:g.pages, subgrups:(g.subgrups||[]).map(function(sg){
-        return {name:sg.name, rows:sg.rows};
+        // num + pages make each drawing self-contained: the field app maps a
+        // page straight to its drawing and parts, with nothing to infer.
+        return {name:sg.name, num:sg.num||'', pages:sg.pages||[], rows:sg.rows};
       })};
     })
   };
