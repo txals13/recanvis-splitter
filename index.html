@@ -2020,15 +2020,27 @@ function exportConjunt(c, idx){
 // -- PDF extraction (shared by the footer selection export and the per-conjunt
 //    / all-conjunts exports) --
 function buildPdfFromPages(pages){
-  var indices = pages.map(function(p){ return p-1; });
   return pdfLibReady.then(function(){
-    return Promise.all([PDFLib.PDFDocument.load(state.pdfBytes), PDFLib.PDFDocument.create()]);
+    // load a copy — repeated exports (one PDF per conjunt) must not consume the
+    // original bytes
+    return Promise.all([PDFLib.PDFDocument.load(state.pdfBytes.slice()), PDFLib.PDFDocument.create()]);
   }).then(function(docs){
     var srcDoc = docs[0], newDoc = docs[1];
+    var n = srcDoc.getPageCount();
+    // Keep only real, in-range page indices — a bad/NaN or out-of-range page
+    // (e.g. an imported catalog whose pages don't match the loaded PDF) would
+    // otherwise crash copyPages with "reading 'node'".
+    var seen = {}, indices = [];
+    pages.forEach(function(p){
+      var i = (parseInt(p, 10) || 0) - 1;
+      if(i >= 0 && i < n && !seen[i]){ seen[i] = 1; indices.push(i); }
+    });
+    if(!indices.length) throw new Error('cap pàgina vàlida per exportar (revisa que les pàgines siguin dins del PDF carregat)');
+    var dropped = pages.length - indices.length;
     return newDoc.copyPages(srcDoc, indices).then(function(copiedPages){
       copiedPages.forEach(function(pg){ newDoc.addPage(pg); });
       return newDoc.save();
-    });
+    }).then(function(bytes){ return {bytes: bytes, count: indices.length, dropped: dropped}; });
   });
 }
 function dlBytes(bytes, filename, mime){
@@ -2042,9 +2054,9 @@ function dlBytes(bytes, filename, mime){
 function exportConjuntPdf(c, idx){
   var pages = conjuntPages(c);
   if(!pages.length) return Promise.reject(new Error('aquest conjunt no té cap pàgina assignada'));
-  return buildPdfFromPages(pages).then(function(bytes){
-    dlBytes(bytes, conjuntPdfFileName(c, idx));
-    return pages.length;
+  return buildPdfFromPages(pages).then(function(res){
+    dlBytes(res.bytes, conjuntPdfFileName(c, idx));
+    return res.count;
   });
 }
 els.exportConjuntBtn.addEventListener('click', function(){
@@ -2085,10 +2097,10 @@ els.exportCombinedPdfBtn.addEventListener('click', function(){
   if(!pages.length){ showToast('Els conjunts no tenen cap pàgina assignada.'); return; }
   var btn = els.exportCombinedPdfBtn, lbl = btn.textContent;
   btn.disabled = true; btn.textContent = 'Generant PDF…';
-  buildPdfFromPages(pages).then(function(bytes){
+  buildPdfFromPages(pages).then(function(res){
     var fn = combinedPdfFileName();
-    dlBytes(bytes, fn);
-    showToast('PDF generat: ' + fn + ' (' + pages.length + ' pàgines).');
+    dlBytes(res.bytes, fn);
+    showToast('PDF generat: ' + fn + ' (' + res.count + ' pàgines' + (res.dropped ? ', ' + res.dropped + ' fora de rang omeses' : '') + ').', res.dropped ? 4000 : 2500);
   }).catch(function(err){
     showToast('Error generant el PDF: ' + err.message, 4000);
   }).then(function(){ btn.disabled = false; btn.textContent = lbl; });
@@ -2159,9 +2171,9 @@ els.exportBtn.addEventListener('click', function(){
   var originalLabel = els.exportBtn.textContent;
   els.exportBtn.textContent = 'Generant PDF…';
   var pagesSorted = Array.from(state.selected).sort(function(a,b){return a-b;});
-  buildPdfFromPages(pagesSorted).then(function(bytes){
-    dlBytes(bytes, state.fileName + '_recanvis.pdf');
-    showToast('PDF generat: ' + pagesSorted.length + ' pàgines.');
+  buildPdfFromPages(pagesSorted).then(function(res){
+    dlBytes(res.bytes, state.fileName + '_recanvis.pdf');
+    showToast('PDF generat: ' + res.count + ' pàgines.');
   }).catch(function(err){
     console.error(err);
     showToast('Error generant el PDF: ' + err.message, 4000);
