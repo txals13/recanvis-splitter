@@ -1614,8 +1614,10 @@ function openGrupReview(conjuntId, grupId, isNew, isNewConjunt){
     id: g.id,
     isNew: !!isNew,
     isNewConjunt: !!isNewConjunt,
+    // Copy every field of the drawing — dropping num/pages here would blank
+    // them in the form and, on save, wipe them from the stored catalog.
     subgrups: (g.subgrups||[]).map(function(sg){
-      return {id: sg.id, name: sg.name, rows: sg.rows.map(function(r){
+      return {id: sg.id, name: sg.name, num: sg.num || '', pages: (sg.pages||[]).slice(), rows: sg.rows.map(function(r){
         return {pos:r.pos, ref:r.ref, cant:r.cant, denominacio:r.denominacio, page:r.page};
       })};
     }),
