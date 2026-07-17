@@ -117,9 +117,14 @@
     background:var(--panel);
   }
   #conjuntsPanelHeader{
-    display:flex; align-items:center; gap:12px; margin-bottom:10px;
+    display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;
   }
-  #conjuntsPanelHeader strong{font-size:13px;}
+  #conjuntsPanelHeader strong{font-size:13px; margin-right:4px;}
+  #remapLbl{
+    display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted);
+    cursor:pointer; margin-left:4px;
+  }
+  #remapLbl input{width:auto; cursor:pointer;}
   #conjuntChipsList{display:flex; flex-wrap:wrap; gap:10px;}
   .conjuntChip{
     background:var(--panel2); border:1px solid var(--border); border-radius:8px;
@@ -239,7 +244,12 @@
   <div id="conjuntsPanelHeader">
     <strong>Conjunts</strong>
     <button id="exportCombinedBtn">Exporta tots (un sol JSON)</button>
+    <button id="exportCombinedPdfBtn">Exporta tots (un sol PDF)</button>
     <button id="exportCatalogBtn">Exporta tots (un JSON per conjunt)</button>
+    <button id="exportCatalogPdfBtn">Exporta tots (un PDF per conjunt)</button>
+    <label id="remapLbl" title="Marca-ho si vols pujar la parella PDF+JSON al field app: el JSON es renumera perquè les pàgines quadrin amb el PDF exportat. Desmarcat, el JSON manté la numeració del manual original.">
+      <input type="checkbox" id="remapPagesChk"> Renumera els JSON per quadrar amb el PDF exportat
+    </label>
   </div>
   <div id="conjuntChipsList"></div>
 </div>
@@ -302,6 +312,7 @@
         <button id="deleteConjuntBtn">Elimina el conjunt</button>
       </div>
       <div class="right">
+        <button id="exportConjuntPdfBtn">⬇ Exporta (PDF)</button>
         <button class="primary" id="exportConjuntBtn">⬇ Exporta (JSON)</button>
       </div>
     </div>
@@ -432,6 +443,10 @@ var els = {
   importMenuBtn: document.getElementById('importMenuBtn'),
   deleteConjuntBtn: document.getElementById('deleteConjuntBtn'),
   exportConjuntBtn: document.getElementById('exportConjuntBtn'),
+  exportConjuntPdfBtn: document.getElementById('exportConjuntPdfBtn'),
+  exportCombinedPdfBtn: document.getElementById('exportCombinedPdfBtn'),
+  exportCatalogPdfBtn: document.getElementById('exportCatalogPdfBtn'),
+  remapPagesChk: document.getElementById('remapPagesChk'),
   menuImportOverlay: document.getElementById('menuImportOverlay'),
   menuImportList: document.getElementById('menuImportList'),
   menuImportCancel: document.getElementById('menuImportCancel'),
@@ -1910,33 +1925,77 @@ function serializeConjunt(c){
     })
   };
 }
+// Every page a conjunt covers: its grups' selections plus each drawing's own
+// range — that's exactly what its exported PDF contains.
+function conjuntPages(c){
+  var set = {};
+  (c.grups||[]).forEach(function(g){
+    (g.pages||[]).forEach(function(p){ set[p] = 1; });
+    (g.subgrups||[]).forEach(function(sg){ (sg.pages||[]).forEach(function(p){ set[p] = 1; }); });
+  });
+  return Object.keys(set).map(Number).sort(function(a,b){ return a-b; });
+}
+function allConjuntsPages(){
+  var set = {};
+  state.conjunts.forEach(function(c){ conjuntPages(c).forEach(function(p){ set[p] = 1; }); });
+  return Object.keys(set).map(Number).sort(function(a,b){ return a-b; });
+}
+// An exported PDF always renumbers from 1, so a JSON meant to pair with it must
+// have its page numbers moved onto that PDF's numbering (125,126,127 -> 1,2,3).
+// Mutates the passed (already cloned) payload.
+function remapSerialized(sc, pages){
+  var map = {};
+  pages.forEach(function(p, i){ map[p] = i + 1; });
+  (sc.grups||[]).forEach(function(g){
+    g.pages = (g.pages||[]).map(function(p){ return map[p]; }).filter(Boolean);
+    (g.subgrups||[]).forEach(function(sg){
+      sg.pages = (sg.pages||[]).map(function(p){ return map[p]; }).filter(Boolean);
+      (sg.rows||[]).forEach(function(r){ if(r.page != null && map[r.page]) r.page = map[r.page]; });
+    });
+  });
+  return sc;
+}
+function remapOn(){ return !!(els.remapPagesChk && els.remapPagesChk.checked); }
 function conjuntPayload(c){
+  var idx = state.conjunts.indexOf(c);
+  var sc = serializeConjunt(c), pages = null;
+  if(remapOn()){
+    pages = conjuntPages(c);
+    sc = remapSerialized(JSON.parse(JSON.stringify(sc)), pages); // clone: never touch live state
+  }
   return {
     exportedAt: new Date().toISOString(),
-    sourceFile: state.fileName + '.pdf',
+    sourceFile: pages ? (conjuntBaseName(c, idx) + '.pdf') : (state.fileName + '.pdf'),
+    pagesRenumbered: !!pages,
     machine: state.machine,
-    portadaPage: state.portadaPage,
-    conjunt: serializeConjunt(c)
+    portadaPage: pages ? null : state.portadaPage, // the cover isn't in the conjunt's PDF
+    conjunt: sc
   };
 }
 // Whole-catalog payload: every conjunt in a single file. importCatalogJson
 // already reads this {conjunts:[…]} shape, so the combined export round-trips.
 function catalogPayload(){
+  var scs = state.conjunts.map(serializeConjunt), pages = null;
+  if(remapOn()){
+    pages = allConjuntsPages();
+    scs = JSON.parse(JSON.stringify(scs)).map(function(sc){ return remapSerialized(sc, pages); });
+  }
   return {
     exportedAt: new Date().toISOString(),
-    sourceFile: state.fileName + '.pdf',
+    sourceFile: pages ? (combinedPdfFileName()) : (state.fileName + '.pdf'),
+    pagesRenumbered: !!pages,
     machine: state.machine,
-    portadaPage: state.portadaPage,
-    conjunts: state.conjunts.map(serializeConjunt)
+    portadaPage: pages ? null : state.portadaPage,
+    conjunts: scs
   };
 }
-// Same base name as the source PDF (…/Foo.pdf → Foo.json) so the exported
-// catalog stays visibly paired with the manual it came from. Uses the raw
-// file name (already a valid filesystem name) rather than sanitizing it, so
-// the two names match exactly.
+// Named after whatever PDF it pairs with: the source manual (…/Foo.pdf →
+// Foo.json), or the exported extract when the pages have been renumbered.
 function catalogFileName(){
-  return (state.fileName || 'recanvis') + '.json';
+  var base = state.fileName || 'recanvis';
+  return remapOn() ? (base + '_recanvis.json') : (base + '.json');
 }
+function combinedPdfFileName(){ return (state.fileName || 'recanvis') + '_recanvis.pdf'; }
 function downloadJson(obj, filename){
   var blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
   var url = URL.createObjectURL(blob);
@@ -1945,15 +2004,48 @@ function downloadJson(obj, filename){
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
 }
-// {núm màquina}_{núm conjunt}_recanvis.json — fall back to name/index when a
-// piece is missing so files never collide.
-function conjuntFileName(c, idx){
+// {núm màquina}_{núm conjunt}_recanvis — fall back to name/index when a piece
+// is missing so files never collide. The .json and .pdf share this base, so a
+// conjunt's pair is obvious in the folder.
+function conjuntBaseName(c, idx){
   var serial = sanitizeFn(state.machine.serial) || 'maquina';
   var num = sanitizeFn(c.num) || sanitizeFn(c.name) || ('conjunt' + ((idx||0)+1));
-  return serial + '_' + num + '_recanvis.json';
+  return serial + '_' + num + '_recanvis';
 }
+function conjuntFileName(c, idx){ return conjuntBaseName(c, idx) + '.json'; }
+function conjuntPdfFileName(c, idx){ return conjuntBaseName(c, idx) + '.pdf'; }
 function exportConjunt(c, idx){
   downloadJson(conjuntPayload(c), conjuntFileName(c, idx));
+}
+// -- PDF extraction (shared by the footer selection export and the per-conjunt
+//    / all-conjunts exports) --
+function buildPdfFromPages(pages){
+  var indices = pages.map(function(p){ return p-1; });
+  return pdfLibReady.then(function(){
+    return Promise.all([PDFLib.PDFDocument.load(state.pdfBytes), PDFLib.PDFDocument.create()]);
+  }).then(function(docs){
+    var srcDoc = docs[0], newDoc = docs[1];
+    return newDoc.copyPages(srcDoc, indices).then(function(copiedPages){
+      copiedPages.forEach(function(pg){ newDoc.addPage(pg); });
+      return newDoc.save();
+    });
+  });
+}
+function dlBytes(bytes, filename, mime){
+  var blob = new Blob([bytes], {type: mime || 'application/pdf'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
+}
+function exportConjuntPdf(c, idx){
+  var pages = conjuntPages(c);
+  if(!pages.length) return Promise.reject(new Error('aquest conjunt no té cap pàgina assignada'));
+  return buildPdfFromPages(pages).then(function(bytes){
+    dlBytes(bytes, conjuntPdfFileName(c, idx));
+    return pages.length;
+  });
 }
 els.exportConjuntBtn.addEventListener('click', function(){
   var c = state.conjunts.find(function(x){ return x.id === state.currentConjuntId; });
@@ -1974,6 +2066,50 @@ els.exportCatalogBtn.addEventListener('click', function(){
   // rapid sequential downloads
   state.conjunts.forEach(function(c, i){ setTimeout(function(){ exportConjunt(c, i); }, i * 400); });
   showToast(state.conjunts.length + (state.conjunts.length===1?' fitxer exportat.':' fitxers exportats.'));
+});
+els.exportConjuntPdfBtn.addEventListener('click', function(){
+  var c = state.conjunts.find(function(x){ return x.id === state.currentConjuntId; });
+  if(!c){ showToast('Cap conjunt obert.'); return; }
+  var idx = state.conjunts.indexOf(c);
+  var btn = els.exportConjuntPdfBtn, lbl = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Generant PDF…';
+  exportConjuntPdf(c, idx).then(function(n){
+    showToast('PDF generat: ' + conjuntPdfFileName(c, idx) + ' (' + n + (n===1?' pàgina).':' pàgines).'));
+  }).catch(function(err){
+    showToast('Error generant el PDF: ' + err.message, 4000);
+  }).then(function(){ btn.disabled = false; btn.textContent = lbl; });
+});
+els.exportCombinedPdfBtn.addEventListener('click', function(){
+  if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
+  var pages = allConjuntsPages();
+  if(!pages.length){ showToast('Els conjunts no tenen cap pàgina assignada.'); return; }
+  var btn = els.exportCombinedPdfBtn, lbl = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Generant PDF…';
+  buildPdfFromPages(pages).then(function(bytes){
+    var fn = combinedPdfFileName();
+    dlBytes(bytes, fn);
+    showToast('PDF generat: ' + fn + ' (' + pages.length + ' pàgines).');
+  }).catch(function(err){
+    showToast('Error generant el PDF: ' + err.message, 4000);
+  }).then(function(){ btn.disabled = false; btn.textContent = lbl; });
+});
+els.exportCatalogPdfBtn.addEventListener('click', function(){
+  if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
+  var btn = els.exportCatalogPdfBtn, lbl = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Generant PDFs…';
+  // sequential (each one re-parses the source PDF) + a small gap so the browser
+  // doesn't drop rapid downloads
+  var chain = Promise.resolve(), done = 0, failed = 0;
+  state.conjunts.forEach(function(c, i){
+    chain = chain.then(function(){
+      btn.textContent = 'Generant PDFs… (' + (i+1) + '/' + state.conjunts.length + ')';
+      return exportConjuntPdf(c, i).then(function(){ done++; }).catch(function(){ failed++; });
+    }).then(function(){ return new Promise(function(r){ setTimeout(r, 400); }); });
+  });
+  chain.then(function(){
+    showToast(done + (done===1?' PDF exportat.':' PDFs exportats.') + (failed?(' ' + failed + ' sense pàgines.'):''), 4000);
+    btn.disabled = false; btn.textContent = lbl;
+  });
 });
 
 // -- Import a JSON (per-conjunt export, or older whole-catalog shapes) into
@@ -2023,29 +2159,9 @@ els.exportBtn.addEventListener('click', function(){
   var originalLabel = els.exportBtn.textContent;
   els.exportBtn.textContent = 'Generant PDF…';
   var pagesSorted = Array.from(state.selected).sort(function(a,b){return a-b;});
-  var indices = pagesSorted.map(function(p){ return p-1; });
-  pdfLibReady.then(function(){
-    return Promise.all([
-      PDFLib.PDFDocument.load(state.pdfBytes),
-      PDFLib.PDFDocument.create()
-    ]);
-  }).then(function(docs){
-    var srcDoc = docs[0], newDoc = docs[1];
-    return newDoc.copyPages(srcDoc, indices).then(function(copiedPages){
-      copiedPages.forEach(function(pg){ newDoc.addPage(pg); });
-      return newDoc.save();
-    });
-  }).then(function(bytes){
-    var blob = new Blob([bytes], {type:'application/pdf'});
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = state.fileName + '_recanvis.pdf';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function(){ URL.revokeObjectURL(url); }, 5000);
-    showToast('PDF generat: ' + state.selected.size + ' pàgines.');
+  buildPdfFromPages(pagesSorted).then(function(bytes){
+    dlBytes(bytes, state.fileName + '_recanvis.pdf');
+    showToast('PDF generat: ' + pagesSorted.length + ' pàgines.');
   }).catch(function(err){
     console.error(err);
     showToast('Error generant el PDF: ' + err.message, 4000);
