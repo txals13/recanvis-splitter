@@ -244,6 +244,8 @@
   <input type="text" id="machClient" placeholder="Client">
   <span id="portadaInfo">Portada: —</span>
   <button id="portadaClearBtn" style="display:none;">Treu portada</button>
+  <span id="colsInfo" style="font-size:12px; color:var(--muted);">Columnes: —</span>
+  <button id="redefineColsBtn" title="Marca una taula de mostra per (re)definir l'ordre de columnes del manual">Defineix columnes</button>
   <button id="importJsonBtn" title="Importa un conjunt d'un fitxer JSON exportat">⬆ Importa (JSON)</button>
   <input type="file" id="importJsonInput" accept="application/json,.json" style="display:none;">
 </div>
@@ -447,6 +449,8 @@ var els = {
   machClient: document.getElementById('machClient'),
   portadaInfo: document.getElementById('portadaInfo'),
   portadaClearBtn: document.getElementById('portadaClearBtn'),
+  colsInfo: document.getElementById('colsInfo'),
+  redefineColsBtn: document.getElementById('redefineColsBtn'),
   importJsonBtn: document.getElementById('importJsonBtn'),
   importJsonInput: document.getElementById('importJsonInput'),
   modalPortadaBtn: document.getElementById('modalPortadaBtn'),
@@ -514,10 +518,12 @@ var state = {
   conjunts: [],
   machine: {serial:'',model:'',client:''},
   portadaPage: null,
+  colLayout: null,     // {cols:[x…], roles:[role…]} — manual-wide column layout
   currentConjuntId: null,
   editingGrup: null,
   pendingMenuImport: null,
   pickingTarget: null, // callback while picking from the drawing
+  pickingCancel: null, // runs if picking is abandoned without a selection
   pickingMode: 'text', // 'text' (name / number) | 'rows' (mark parts-list rows)
   pickItems: []        // per-item text geometry (canvas space) for the current modal page
 };
@@ -555,7 +561,7 @@ function resetApp(){
   state.selected = new Set(); state.cells = [];
   state.conjunts = []; state.editingGrup = null; state.currentConjuntId = null;
   state.pendingMenuImport = null;
-  state.machine = emptyMachine(); state.portadaPage = null;
+  state.machine = emptyMachine(); state.portadaPage = null; state.colLayout = null;
   els.grid.innerHTML = '';
   els.header.style.display = 'none';
   els.footer.style.display = 'none';
@@ -599,6 +605,7 @@ function loadPdf(bytesForPdfjs){
     var cat = loadCatalogForFile(state.fileName);
     state.machine = cat.machine;
     state.portadaPage = cat.portadaPage;
+    state.colLayout = cat.colLayout;
     state.conjunts = cat.conjunts;
     renderMachinePanel();
     renderConjuntsPanel();
@@ -852,29 +859,32 @@ function composeItemsText(sel){ return composeItemsLines(sel).join(' ').replace(
 // Opens `page` in the modal in picking mode: drag a rectangle over what you
 // want (or plain-click a single item).
 //   mode 'text' (default) — one drag, cb(text), then the modal closes.
-//   mode 'rows'           — each drag calls cb(lines[], page) and picking STAYS
-//                           on, so you can mark several regions / pages; Esc or
-//                           closing the modal finishes.
-function startPicking(page, cb, mode){
-  if(!page){ showToast('Aquest element encara no té cap pàgina d\'on triar el text.'); return; }
+//   mode 'rows'           — one drag over the parts table, cb(items[], page).
+// cancelCb (optional) runs if picking is abandoned (modal closed without a pick).
+function startPicking(page, cb, mode, cancelCb){
+  if(!page){ showToast('Aquest element encara no té cap pàgina d\'on triar el text.'); if(cancelCb) cancelCb(); return; }
   state.pickingTarget = cb;
   state.pickingMode = mode || 'text';
+  state.pickingCancel = cancelCb || null;
   state.pickItems = [];
   els.modalPickHint.textContent = (state.pickingMode === 'rows')
-    ? '🎯 Arrossega sobre les FILES de recanvis (pots repetir i canviar de pàgina) — Esc per acabar'
+    ? '🎯 Arrossega un requadre sobre la TAULA de recanvis (Esc per cancel·lar)'
     : '🎯 Arrossega el ratolí sobre el text que vols (Esc per cancel·lar)';
   els.modalPickHint.style.display = 'inline-block';
   els.modalImgWrap.classList.add('picking');
   openModal(page);
 }
 function endPicking(){
+  var cc = state.pickingCancel;
   state.pickingTarget = null;
   state.pickingMode = 'text';
+  state.pickingCancel = null;
   state.pickItems = [];
   pickDrag = null;
   els.pickRect.style.display = 'none';
   els.modalPickHint.style.display = 'none';
   els.modalImgWrap.classList.remove('picking');
+  if(cc) cc();
 }
 // -- drag-rectangle selection (display-space coords relative to the canvas;
 //    converted to canvas-internal space only for hit-testing) --
@@ -933,6 +943,7 @@ document.addEventListener('mouseup', function(){
   // marked region (the column mapping is what the user tunes next).
   if(state.pickingMode === 'rows'){
     var cbRows = state.pickingTarget, page = state.modalPage, items = sel.slice();
+    state.pickingCancel = null; // a real pick happened — don't fire the cancel
     endPicking();
     closeModal();
     cbRows(items, page);
@@ -1041,11 +1052,12 @@ function emptyMachine(){ return {serial:'', model:'', client:''}; }
 // held just the bare conjunts array — migrate those on read.
 function loadCatalogForFile(fileName){
   var raw = loadAllCatalogs()[fileName];
-  if(!raw) return { machine:emptyMachine(), portadaPage:null, conjunts:[] };
-  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, conjunts:normalizeConjunts(raw) };
+  if(!raw) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:[] };
+  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:normalizeConjunts(raw) };
   return {
     machine: Object.assign(emptyMachine(), raw.machine || {}),
     portadaPage: raw.portadaPage || null,
+    colLayout: raw.colLayout || null,
     conjunts: normalizeConjunts(raw.conjunts || [])
   };
 }
@@ -1091,7 +1103,7 @@ function grupRowCount(g){
 }
 function persistConjunts(){
   var all = loadAllCatalogs();
-  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, conjunts: state.conjunts };
+  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, colLayout: state.colLayout, conjunts: state.conjunts };
   localStorage.setItem(CATALOG_LS_KEY, JSON.stringify(all));
 }
 function uid(){
@@ -1213,7 +1225,7 @@ function sortRowsByPos(rows){
 // editable/markable by hand in the review modal.
 function buildSubgrupsForPages(pages){
   return Promise.all(pages.map(function(p){
-    return Promise.all([extractRowsFromPage(p), extractSubgrupFromPage(p), extractSubgrupNumFromPage(p)]).then(function(res){
+    return Promise.all([extractRows(p), extractSubgrupFromPage(p), extractSubgrupNumFromPage(p)]).then(function(res){
       return { page: p, name: stripTitleLabel(res[1] || ''), num: res[2] || '', rows: res[0] };
     });
   })).then(function(perPage){
@@ -1376,9 +1388,20 @@ function itemsToGrid(items){
     else { gapRun++; if(inCol && gapRun >= gapMin) inCol = false; }
   }
   if(!cols.length) cols = [minX];
+  return {cols: cols, rows: rowsFromItems(items, cols)};
+}
+// Splits items into text cells using the given column x-starts, rows top→bottom.
+function rowsFromItems(items, cols){
   function colOf(px){ var idx=0; for(var k=0;k<cols.length;k++){ if(px >= cols[k]-2) idx=k; else break; } return idx; }
+  var lines = [];
+  items.forEach(function(it){
+    var line = null;
+    for(var j=0;j<lines.length;j++){ if(Math.abs(lines[j].py - it.py) < 3){ line = lines[j]; break; } }
+    if(!line){ line = {py: it.py, items: []}; lines.push(line); }
+    line.items.push(it);
+  });
   lines.sort(function(a,b){ return b.py - a.py; });
-  var rows = lines.map(function(l){
+  return lines.map(function(l){
     var cells = []; for(var k=0;k<cols.length;k++) cells.push([]);
     l.items.forEach(function(it){ cells[colOf(it.px)].push(it); });
     return cells.map(function(cell){
@@ -1388,7 +1411,27 @@ function itemsToGrid(items){
       return t.replace(/\s+/g,' ').trim();
     });
   }).filter(function(r){ return r.some(function(c){ return c; }); });
-  return {cols: cols, rows: rows};
+}
+// Builds a part row {pos,ref,cant,denominacio,page} from a cell array + the
+// manual's column roles (columns with no role are dropped).
+function rowFromCells(cells, roles, page){
+  var row = {pos:'', ref:'', cant:'', denominacio:'', page:page};
+  roles.forEach(function(role, c){
+    if(!role) return;
+    var v = (cells[c]||'').trim(); if(!v) return;
+    if(role === 'denominacio') row.denominacio = (row.denominacio ? row.denominacio+' ' : '') + v;
+    else if(!row[role]) row[role] = v;
+  });
+  return row;
+}
+// Whole-page auto-extraction isn't reliable on this manual (tables vary in
+// column count/position between drawings). So once the column order is defined,
+// each drawing's rows come from the user marking its table (reliable per-table
+// detection with the roles already decided); subgrups start empty. Manuals with
+// no defined layout still use the legacy heuristic as a rough start.
+function extractRows(page){
+  if(state.colLayout && state.colLayout.roles) return Promise.resolve([]);
+  return extractRowsFromPage(page);
 }
 // Guesses a field for a column from its values, so the mapping dropdowns start
 // sensibly. leftmost small-integer col → Pos; other small-integer col → Cant;
@@ -1424,11 +1467,30 @@ var COL_ROLES = [
   {v:'cant', label:'Cant.'}, {v:'denominacio', label:'Denominació'}
 ];
 function escHtml(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[ch]; }); }
-function openColMap(grid, page, sg){
-  if(!grid.cols.length || !grid.rows.length){ showToast('Cap fila reconeguda en aquesta selecció.'); return; }
+// Ensures the manual has a column layout before extracting. Asked once: the
+// user marks a sample parts table, then maps its columns; the layout is stored
+// on the manual and reused for every extraction. onDone() proceeds; onCancel()
+// (optional) runs if the user backs out.
+function ensureColLayout(samplePage, onDone, onCancel, force){
+  if(!force && state.colLayout && state.colLayout.cols && state.colLayout.cols.length){ onDone(); return; }
+  if(!samplePage){ showToast('Selecciona un full amb una taula de recanvis a la graella.'); if(onCancel) onCancel(); return; }
+  showToast('Marca una taula de recanvis de mostra per definir les columnes del manual.', 4500);
+  startPicking(samplePage, function(items){
+    var grid = itemsToGrid(items);
+    if(!grid.cols.length || !grid.rows.length){ showToast('Cap taula reconeguda. Torna-ho a provar.'); if(onCancel) onCancel(); return; }
+    openColMap(grid, samplePage, {onLayout: onDone, onCancel: onCancel});
+  }, 'rows', onCancel);
+}
+
+// opts = {sg} → add the marked rows to that drawing; {onLayout:fn} → define the
+// manual-wide column layout (cols + roles) and call fn().
+function openColMap(grid, page, opts){
+  if(!grid.cols.length || !grid.rows.length){ showToast('Cap taula reconeguda en aquesta selecció.'); return; }
   var roles = guessRoles(grid);
-  if(lastColRoles && lastColRoles.length === grid.cols.length) roles = lastColRoles.slice(); // reuse the last layout
-  pendingColMap = {grid:grid, page:page, sg:sg, roles:roles};
+  var pre = (state.colLayout && state.colLayout.roles) || lastColRoles;
+  if(pre && pre.length === grid.cols.length) roles = pre.slice(); // reuse a known layout
+  pendingColMap = {grid:grid, page:page, sg:(opts&&opts.sg)||null, onLayout:(opts&&opts.onLayout)||null, onCancel:(opts&&opts.onCancel)||null, roles:roles};
+  els.colMapConfirm.textContent = pendingColMap.onLayout ? 'Desa les columnes' : 'Importa les files';
   renderColMap();
   els.colMapOverlay.classList.add('open');
 }
@@ -1452,23 +1514,34 @@ function renderColMap(){
     sel.addEventListener('change', function(){ pendingColMap.roles[parseInt(sel.dataset.c,10)] = sel.value; renderColMap(); });
   });
 }
-function closeColMap(){ els.colMapOverlay.classList.remove('open'); pendingColMap = null; }
-els.colMapCancel.addEventListener('click', closeColMap);
-els.colMapOverlay.addEventListener('click', function(e){ if(e.target === els.colMapOverlay) closeColMap(); });
+function closeColMap(cancelled){
+  var pc = pendingColMap;
+  els.colMapOverlay.classList.remove('open');
+  pendingColMap = null;
+  if(cancelled && pc && pc.onCancel) pc.onCancel();
+}
+els.colMapCancel.addEventListener('click', function(){ closeColMap(true); });
+els.colMapOverlay.addEventListener('click', function(e){ if(e.target === els.colMapOverlay) closeColMap(true); });
 els.colMapConfirm.addEventListener('click', function(){
   var pc = pendingColMap; if(!pc) return;
-  var roles = pc.roles, sg = pc.sg, page = pc.page, added = 0;
+  var roles = pc.roles;
+  if(!roles.some(function(r){ return r === 'pos'; })){ showToast('Assigna una columna a Pos.'); return; }
+  lastColRoles = roles.slice();
+  // Layout mode: store the manual-wide columns and continue (extraction uses it).
+  if(pc.onLayout){
+    var cb = pc.onLayout;
+    state.colLayout = {cols: pc.grid.cols.slice(), roles: roles.slice()};
+    persistConjunts();
+    closeColMap();
+    cb();
+    return;
+  }
+  // Row mode: add the marked rows to the drawing.
+  var sg = pc.sg, page = pc.page, added = 0;
   pc.grid.rows.forEach(function(r){
-    var row = {pos:'', ref:'', cant:'', denominacio:'', page:page};
-    roles.forEach(function(role, c){
-      if(!role) return;
-      var v = (r[c]||'').trim(); if(!v) return;
-      if(role==='denominacio') row.denominacio = (row.denominacio ? row.denominacio+' ' : '') + v;
-      else if(!row[role]) row[role] = v;
-    });
+    var row = rowFromCells(r, roles, page);
     if(row.pos || row.ref || row.denominacio){ sg.rows.push(row); added++; }
   });
-  lastColRoles = roles.slice();
   sortRowsByPos(sg.rows);
   closeColMap();
   renderSubgrupsList();
@@ -1529,8 +1602,10 @@ els.nameModalCreate.addEventListener('click', function(){
   var action = pendingNameAction, conjuntId = pendingConjuntId, pages = pendingPages;
   els.nameModalOverlay.classList.remove('open');
   pendingNameAction = null; pendingConjuntId = null; pendingPages = null;
-  if(action === 'newconjunt') createConjuntWithGrup(name, pages);
-  else if(action === 'grup') addGrupToConjunt(conjuntId, name, pages, false);
+  // Decide the column layout BEFORE extracting (asked once per manual); on
+  // cancel nothing is created / added.
+  if(action === 'newconjunt') ensureColLayout(pages[0], function(){ createConjuntWithGrup(name, pages); });
+  else if(action === 'grup') ensureColLayout(pages[0], function(){ addGrupToConjunt(conjuntId, name, pages, false); }, function(){ openConjuntDetail(conjuntId); });
 });
 
 function createConjuntWithGrup(name, pages){
@@ -1560,6 +1635,15 @@ function renderMachinePanel(){
     els.portadaInfo.style.cursor = 'default';
     els.portadaClearBtn.style.display = 'none';
   }
+  var lay = state.colLayout;
+  if(lay && lay.roles){
+    var named = lay.roles.filter(function(r){ return r; });
+    els.colsInfo.textContent = 'Columnes: ' + (named.length ? named.join(' · ') : '—');
+    els.redefineColsBtn.textContent = 'Redefineix columnes';
+  } else {
+    els.colsInfo.textContent = 'Columnes: — (es demanaran al crear un conjunt)';
+    els.redefineColsBtn.textContent = 'Defineix columnes';
+  }
 }
 // machine fields: update state live, persist on blur/enter (avoid rewriting the
 // whole catalog on every keystroke)
@@ -1568,6 +1652,10 @@ function renderMachinePanel(){
   els[pair[0]].addEventListener('change', function(){ persistConjunts(); });
 });
 els.portadaClearBtn.addEventListener('click', function(){ state.portadaPage = null; persistConjunts(); renderMachinePanel(); });
+els.redefineColsBtn.addEventListener('click', function(){
+  var sample = Array.from(state.selected).sort(function(a,b){ return a-b; })[0] || state.portadaPage || (state.numPages ? 1 : null);
+  ensureColLayout(sample, function(){ renderMachinePanel(); showToast('Columnes definides.'); }, function(){ renderMachinePanel(); }, true);
+});
 els.portadaInfo.addEventListener('click', function(){ if(state.portadaPage) openModal(state.portadaPage); });
 
 function renderConjuntsPanel(){
@@ -1847,15 +1935,17 @@ els.assignPagesBtn.addEventListener('click', function(){
   var eg = state.editingGrup;
   if(!eg || state.selected.size === 0) return;
   var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
-  els.assignPagesBtn.disabled = true;
-  els.assignPagesBtn.textContent = 'Extraient text…';
-  buildSubgrupsForPages(pages).then(function(subgrups){
-    eg.pages = pages;
-    eg.subgrups = subgrups;
-    renderGrupReviewBody();
-  }).catch(function(err){
-    showToast('Error extraient el text: ' + err.message, 4000);
-    els.assignPagesBtn.disabled = false;
+  ensureColLayout(pages[0], function(){
+    els.assignPagesBtn.disabled = true;
+    els.assignPagesBtn.textContent = 'Extraient text…';
+    buildSubgrupsForPages(pages).then(function(subgrups){
+      eg.pages = pages;
+      eg.subgrups = subgrups;
+      renderGrupReviewBody();
+    }).catch(function(err){
+      showToast('Error extraient el text: ' + err.message, 4000);
+      els.assignPagesBtn.disabled = false;
+    });
   });
 });
 
@@ -1978,7 +2068,22 @@ function renderSubgrupsList(){
     markBtn.title = 'Arrossega un requadre sobre la taula de recanvis del full';
     markBtn.addEventListener('click', function(){
       startPicking(firstPageOf(sg, eg), function(items, page){
-        openColMap(itemsToGrid(items), page, sg);
+        var grid = itemsToGrid(items);
+        var lay = state.colLayout;
+        // Roles already decided: if this table's columns match the layout, add
+        // rows straight away; otherwise open the mapping pre-filled to adjust.
+        if(lay && lay.roles && lay.roles.length === grid.cols.length){
+          var added = 0;
+          grid.rows.forEach(function(cells){
+            var row = rowFromCells(cells, lay.roles, page);
+            if(row.pos || row.ref || row.denominacio){ sg.rows.push(row); added++; }
+          });
+          sortRowsByPos(sg.rows);
+          renderSubgrupsList();
+          showToast(added ? (added + (added===1?' fila afegida.':' files afegides.')) : 'Cap fila reconeguda; revisa les columnes.');
+        } else {
+          openColMap(grid, page, {sg: sg});
+        }
       }, 'rows');
     });
     box.appendChild(markBtn);
@@ -2034,7 +2139,7 @@ document.addEventListener('keydown', function(e){
   // The page modal sits on top (e.g. while picking a name from the drawing)
   // and its own keydown handler closes it — don't also close what's beneath.
   if(els.modalOverlay.classList.contains('open')) return;
-  if(els.colMapOverlay.classList.contains('open')){ closeColMap(); return; }
+  if(els.colMapOverlay.classList.contains('open')){ closeColMap(true); return; }
   if(els.nameModalOverlay.classList.contains('open')){ cancelNameModal(); return; }
   if(els.menuImportOverlay.classList.contains('open')){ cancelMenuImport(); return; }
   if(els.grupModalOverlay.classList.contains('open')){ els.reviewCancelBtn.click(); return; }
