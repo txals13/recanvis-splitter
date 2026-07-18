@@ -1424,14 +1424,121 @@ function rowFromCells(cells, roles, page){
   });
   return row;
 }
-// Whole-page auto-extraction isn't reliable on this manual (tables vary in
-// column count/position between drawings). So once the column order is defined,
-// each drawing's rows come from the user marking its table (reliable per-table
-// detection with the roles already decided); subgrups start empty. Manuals with
-// no defined layout still use the legacy heuristic as a rough start.
+// ---- Header-anchored extraction ----
+// The reliable anchor for finding a parts table is its PRINTED HEADER ROW
+// (POS. / CANT. / DENOMINACION / …): it gives the table's position, its column
+// count, the roles (from the label names) and even its orientation — some
+// sheets carry the table rotated 90°. Column x-positions are then detected from
+// the data itself (labels are centered, data is left-aligned), per page, so
+// tables that differ between drawings are no problem. Drawing sheets carry an
+// EMPTY template header in the title block — those correctly yield 0 rows.
+function headerRoleOf(s){
+  s = (s||'').trim().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\.$/,'').toUpperCase();
+  if(/^POS$/.test(s)) return 'pos';
+  if(/^(CANT|CANTIDAD|CTD|UDS)$/.test(s)) return 'cant';
+  if(/^(DENOMINACION|DESCRIPCION|DESIGNACION)$/.test(s)) return 'denominacio';
+  if(/^(NUMERO|N[º°]|CODIGO|REFERENCIA|REF|PLANO)$/.test(s)) return 'ref';
+  if(/^(MATERIAL|PROCEDENCIA|OBSERVACIONES|MARCA|NORMA)$/.test(s)) return '';
+  return null; // not a table-header label
+}
+// Maps an item into the table's own axes: u = along the reading direction,
+// v = across it (row position). Handles the 4 axis-aligned rotations.
+function uvOf(it){
+  if(it.rot === 90)  return {u: it.py,  v: it.px};
+  if(it.rot === 180) return {u: -it.px, v: -it.py};
+  if(it.rot === 270) return {u: -it.py, v: -it.px};
+  return {u: it.px, v: it.py};
+}
+// Raw text items of a page with their rotation (from the text transform).
+function getPageItemsFull(page){
+  return state.pdfDoc.getPage(page).then(function(pdfPage){ return pdfPage.getTextContent(); }).then(function(tc){
+    var items = [];
+    tc.items.forEach(function(it){
+      if(!it.str || !it.str.trim()) return;
+      var tr = it.transform;
+      var ang = ((Math.round(Math.atan2(tr[1], tr[0])*180/Math.PI) % 360) + 360) % 360;
+      items.push({px: tr[4], py: tr[5], pw: it.width||0, str: it.str, rot: ang});
+    });
+    return items;
+  });
+}
+// Finds parts-table headers: label items sharing a baseline (in their own
+// orientation), needing POS plus at least two more labels.
+function findPartsHeaders(items){
+  var headers = [];
+  [0,90,180,270].forEach(function(rot){
+    var labs = [];
+    items.forEach(function(it){
+      if(it.rot !== rot) return;
+      var role = headerRoleOf(it.str);
+      if(role === null) return;
+      var uv = uvOf(it);
+      labs.push({u: uv.u, v: uv.v, w: it.pw, role: role});
+    });
+    var groups = [];
+    labs.forEach(function(l){
+      var g = null;
+      for(var i=0;i<groups.length;i++){ if(Math.abs(groups[i].v - l.v) < 3){ g = groups[i]; break; } }
+      if(!g){ g = {v: l.v, labs: []}; groups.push(g); }
+      g.labs.push(l);
+    });
+    groups.forEach(function(g){
+      if(g.labs.length >= 3 && g.labs.some(function(l){ return l.role === 'pos'; })){
+        g.labs.sort(function(a,b){ return a.u - b.u; });
+        headers.push({rot: rot, v: g.v, labs: g.labs});
+      }
+    });
+  });
+  return headers;
+}
+// Extracts the rows of the table anchored at `hdr`. The data can sit on either
+// side of the header line (lists grow away from the title block) — both are
+// tried and the side that parses into more valid rows wins. Columns come from
+// the data (itemsToGrid); if their count doesn't match the labels, boundaries
+// are derived from the labels instead.
+function extractTableRows(items, hdr, page){
+  var labs = hdr.labs;
+  var uMin = labs[0].u - 25, uMax = labs[labs.length-1].u + (labs[labs.length-1].w||0) + 120;
+  function parseSide(above){
+    var reg = [];
+    items.forEach(function(it){
+      if(it.rot !== hdr.rot) return;
+      var uv = uvOf(it);
+      if(uv.u < uMin || uv.u > uMax) return;
+      var dv = uv.v - hdr.v;
+      if(above ? dv > 2 : dv < -2) reg.push({px: uv.u, py: uv.v, pw: it.pw, str: it.str});
+    });
+    if(!reg.length) return [];
+    var grid = itemsToGrid(reg), roles;
+    if(grid.cols.length === labs.length){ roles = labs.map(function(l){ return l.role; }); }
+    else {
+      var cols = labs.map(function(l,i){ return i === 0 ? labs[0].u - 25 : (labs[i-1].u + (labs[i-1].w||0) + 2); });
+      grid = {cols: cols, rows: rowsFromItems(reg, cols)};
+      roles = labs.map(function(l){ return l.role; });
+    }
+    return grid.rows.map(function(cells){ return rowFromCells(cells, roles, page); })
+      .filter(function(r){ return /^\d+(\.\d+)?$/.test(r.pos) && (r.ref || r.denominacio); });
+  }
+  var above = parseSide(true), below = parseSide(false);
+  return above.length >= below.length ? above : below;
+}
+function extractRowsFromHeaders(page){
+  return getPageItemsFull(page).then(function(items){
+    var headers = findPartsHeaders(items), rows = [];
+    headers.forEach(function(h){ rows = rows.concat(extractTableRows(items, h, page)); });
+    return rows;
+  }).catch(function(){ return []; });
+}
+
+// Extraction chain: header-anchored first (self-describing, handles rotation);
+// with no header on the page, a defined colLayout means "rows are marked by
+// hand" (whole-page auto isn't reliable there), else the legacy heuristic.
 function extractRows(page){
-  if(state.colLayout && state.colLayout.roles) return Promise.resolve([]);
-  return extractRowsFromPage(page);
+  return extractRowsFromHeaders(page).then(function(rows){
+    if(rows.length) return rows;
+    if(state.colLayout && state.colLayout.roles) return [];
+    return extractRowsFromPage(page);
+  });
 }
 // Guesses a field for a column from its values, so the mapping dropdowns start
 // sensibly. leftmost small-integer col → Pos; other small-integer col → Cant;
@@ -1471,15 +1578,30 @@ function escHtml(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(ch)
 // user marks a sample parts table, then maps its columns; the layout is stored
 // on the manual and reused for every extraction. onDone() proceeds; onCancel()
 // (optional) runs if the user backs out.
-function ensureColLayout(samplePage, onDone, onCancel, force){
+function ensureColLayout(pagesOrPage, onDone, onCancel, force){
+  var list = Array.isArray(pagesOrPage) ? pagesOrPage.slice() : (pagesOrPage ? [pagesOrPage] : []);
+  var samplePage = list[0] || null;
   if(!force && state.colLayout && state.colLayout.cols && state.colLayout.cols.length){ onDone(); return; }
-  if(!samplePage){ showToast('Selecciona un full amb una taula de recanvis a la graella.'); if(onCancel) onCancel(); return; }
-  showToast('Marca una taula de recanvis de mostra per definir les columnes del manual.', 4500);
-  startPicking(samplePage, function(items){
-    var grid = itemsToGrid(items);
-    if(!grid.cols.length || !grid.rows.length){ showToast('Cap taula reconeguda. Torna-ho a provar.'); if(onCancel) onCancel(); return; }
-    openColMap(grid, samplePage, {onLayout: onDone, onCancel: onCancel});
-  }, 'rows', onCancel);
+  if(force){ askMark(); return; }
+  // Pages with a printed table header self-describe their columns — probe a few
+  // of the selected pages and skip the question entirely when one is found.
+  var probeList = list.slice(0, 10);
+  (function probe(i){
+    if(i >= probeList.length){ askMark(); return; }
+    extractRowsFromHeaders(probeList[i]).then(function(rows){
+      if(rows.length){ onDone(); return; }
+      probe(i+1);
+    });
+  })(0);
+  function askMark(){
+    if(!samplePage){ showToast('Selecciona un full amb una taula de recanvis a la graella.'); if(onCancel) onCancel(); return; }
+    showToast('Marca una taula de recanvis de mostra per definir les columnes del manual.', 4500);
+    startPicking(samplePage, function(items){
+      var grid = itemsToGrid(items);
+      if(!grid.cols.length || !grid.rows.length){ showToast('Cap taula reconeguda. Torna-ho a provar.'); if(onCancel) onCancel(); return; }
+      openColMap(grid, samplePage, {onLayout: onDone, onCancel: onCancel});
+    }, 'rows', onCancel);
+  }
 }
 
 // opts = {sg} → add the marked rows to that drawing; {onLayout:fn} → define the
@@ -1604,8 +1726,8 @@ els.nameModalCreate.addEventListener('click', function(){
   pendingNameAction = null; pendingConjuntId = null; pendingPages = null;
   // Decide the column layout BEFORE extracting (asked once per manual); on
   // cancel nothing is created / added.
-  if(action === 'newconjunt') ensureColLayout(pages[0], function(){ createConjuntWithGrup(name, pages); });
-  else if(action === 'grup') ensureColLayout(pages[0], function(){ addGrupToConjunt(conjuntId, name, pages, false); }, function(){ openConjuntDetail(conjuntId); });
+  if(action === 'newconjunt') ensureColLayout(pages, function(){ createConjuntWithGrup(name, pages); });
+  else if(action === 'grup') ensureColLayout(pages, function(){ addGrupToConjunt(conjuntId, name, pages, false); }, function(){ openConjuntDetail(conjuntId); });
 });
 
 function createConjuntWithGrup(name, pages){
@@ -1641,7 +1763,7 @@ function renderMachinePanel(){
     els.colsInfo.textContent = 'Columnes: ' + (named.length ? named.join(' · ') : '—');
     els.redefineColsBtn.textContent = 'Redefineix columnes';
   } else {
-    els.colsInfo.textContent = 'Columnes: — (es demanaran al crear un conjunt)';
+    els.colsInfo.textContent = 'Columnes: automàtiques amb capçalera (POS./CANT./…); si no n\'hi ha, es demanaran';
     els.redefineColsBtn.textContent = 'Defineix columnes';
   }
 }
@@ -1935,7 +2057,7 @@ els.assignPagesBtn.addEventListener('click', function(){
   var eg = state.editingGrup;
   if(!eg || state.selected.size === 0) return;
   var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
-  ensureColLayout(pages[0], function(){
+  ensureColLayout(pages, function(){
     els.assignPagesBtn.disabled = true;
     els.assignPagesBtn.textContent = 'Extraient text…';
     buildSubgrupsForPages(pages).then(function(subgrups){
