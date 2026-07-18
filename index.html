@@ -179,6 +179,14 @@
   .sgPagesRow{display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;}
   .sgPagesRow input.sgPages{width:120px;}
   .sgPagesRow .sgHint{font-size:11px; color:var(--muted);}
+  /* column mapping */
+  table.colMapTable{border-collapse:collapse; width:100%;}
+  table.colMapTable th, table.colMapTable td{border:1px solid var(--border); padding:6px 8px; font-size:12px; vertical-align:top;}
+  table.colMapTable th{background:var(--panel2); text-align:left; white-space:nowrap;}
+  table.colMapTable th select{width:100%; margin-top:4px;}
+  table.colMapTable td{color:var(--muted); max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  table.colMapTable th.ignored, table.colMapTable td.ignored{opacity:.4;}
+  table.colMapTable .colIdx{font-size:10px; color:var(--muted); font-weight:normal;}
   .reviewActions{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
   .reviewActions .left{display:flex; gap:8px;}
   .reviewActions .right{display:flex; gap:8px;}
@@ -361,6 +369,23 @@
   </div>
 </div>
 
+<div class="overlay" id="colMapOverlay">
+  <div class="reviewCard" id="colMapCard">
+    <div class="reviewTop">
+      <strong>Columnes detectades</strong>
+      <span style="color:var(--muted); font-size:12px;">assigna cada columna (en l'ordre de la pàgina) o ignora-la</span>
+    </div>
+    <div id="colMapBody" style="overflow:auto; max-height:60vh;"></div>
+    <div class="reviewActions" style="margin-top:14px;">
+      <div class="left"><span id="colMapInfo" style="font-size:12px; color:var(--muted);"></span></div>
+      <div class="right">
+        <button id="colMapCancel">Cancel·la</button>
+        <button class="primary" id="colMapConfirm">Importa les files</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -459,6 +484,11 @@ var els = {
   pickConjuntNumBtn: document.getElementById('pickConjuntNumBtn'),
   subgrupsList: document.getElementById('subgrupsList'),
   addSubgrupBtn: document.getElementById('addSubgrupBtn'),
+  colMapOverlay: document.getElementById('colMapOverlay'),
+  colMapBody: document.getElementById('colMapBody'),
+  colMapInfo: document.getElementById('colMapInfo'),
+  colMapCancel: document.getElementById('colMapCancel'),
+  colMapConfirm: document.getElementById('colMapConfirm'),
   modalPickHint: document.getElementById('modalPickHint'),
   modalImgWrap: document.getElementById('modalImgWrap'),
   pickRect: document.getElementById('pickRect'),
@@ -898,11 +928,14 @@ document.addEventListener('mouseup', function(){
     showToast(isClick ? 'Cap text just aquí — arrossega un requadre sobre el text.' : 'Cap text dins la selecció.');
     return;
   }
-  // 'rows' mode stays open: each drag hands over the marked lines so you can
-  // mark several regions (and pages) into the same drawing.
+  // 'rows' mode: hand over the raw marked items (with PDF-space coords) so the
+  // caller can split them into columns by X position. Picking ends after one
+  // marked region (the column mapping is what the user tunes next).
   if(state.pickingMode === 'rows'){
-    var lines = composeItemsLines(sel);
-    state.pickingTarget(lines, state.modalPage);
+    var cbRows = state.pickingTarget, page = state.modalPage, items = sel.slice();
+    endPicking();
+    closeModal();
+    cbRows(items, page);
     return;
   }
   var text = composeItemsText(sel);
@@ -1304,6 +1337,143 @@ function parseLineToRow(text, page){
   }
   return {pos:pos, ref:ref, cant:cant, denominacio:denomParts.join(' '), page:page};
 }
+
+// ---- Column-aware row marking ----
+// Splits the marked items into columns in the page's own left-to-right order,
+// then rows top-to-bottom. Returns { cols:[x…], rows:[[cellText,…],…] }; the
+// caller maps each column to a field or ignores it.
+//
+// Columns are found from a per-ROW x-coverage profile: a column separator is an
+// x band that few rows put ink on. (Counting distinct rows — not total items —
+// is what makes it robust: a wide, variable-length Denominació column doesn't
+// blur the gaps the way a raw ink histogram would.)
+function itemsToGrid(items){
+  if(!items.length) return {cols:[], rows:[]};
+  var minX = Infinity, maxX = -Infinity;
+  items.forEach(function(it){ if(it.px < minX) minX = it.px; var e = it.px + (it.pw||0); if(e > maxX) maxX = e; });
+  // group items into rows by baseline (Y)
+  var lines = [];
+  items.forEach(function(it){
+    var line = null;
+    for(var j=0;j<lines.length;j++){ if(Math.abs(lines[j].py - it.py) < 3){ line = lines[j]; break; } }
+    if(!line){ line = {py: it.py, items: []}; lines.push(line); }
+    line.items.push(it);
+  });
+  var nRows = lines.length || 1;
+  // per-x, how many distinct rows have ink there
+  var W = Math.ceil(maxX - minX) + 2, rowCov = new Array(W);
+  for(var z=0;z<W;z++) rowCov[z] = 0;
+  lines.forEach(function(l){
+    var mark = new Array(W);
+    l.items.forEach(function(it){ var a=Math.floor(it.px-minX), b=Math.ceil(it.px+(it.pw||0)-minX); for(var x=a;x<b&&x<W;x++) if(x>=0) mark[x]=1; });
+    for(var x=0;x<W;x++) if(mark[x]) rowCov[x]++;
+  });
+  // a column starts where ink resumes after a gap (a run of low-coverage x)
+  var thrCov = Math.max(1, nRows*0.2), gapMin = 4;
+  var cols = [], inCol = false, gapRun = 0;
+  for(var x=0;x<W;x++){
+    if(rowCov[x] >= thrCov){ if(!inCol){ cols.push(minX + x); inCol = true; } gapRun = 0; }
+    else { gapRun++; if(inCol && gapRun >= gapMin) inCol = false; }
+  }
+  if(!cols.length) cols = [minX];
+  function colOf(px){ var idx=0; for(var k=0;k<cols.length;k++){ if(px >= cols[k]-2) idx=k; else break; } return idx; }
+  lines.sort(function(a,b){ return b.py - a.py; });
+  var rows = lines.map(function(l){
+    var cells = []; for(var k=0;k<cols.length;k++) cells.push([]);
+    l.items.forEach(function(it){ cells[colOf(it.px)].push(it); });
+    return cells.map(function(cell){
+      cell.sort(function(a,b){ return a.px - b.px; });
+      var t='', prevEnd=null;
+      cell.forEach(function(it){ if(prevEnd!==null && (it.px-prevEnd)>1) t+=' '; t+=it.str; prevEnd=it.px+(it.pw||0); });
+      return t.replace(/\s+/g,' ').trim();
+    });
+  }).filter(function(r){ return r.some(function(c){ return c; }); });
+  return {cols: cols, rows: rows};
+}
+// Guesses a field for a column from its values, so the mapping dropdowns start
+// sensibly. leftmost small-integer col → Pos; other small-integer col → Cant;
+// code-like col → Ref; the widest text col → Denominació.
+function guessRoles(grid){
+  var nc = grid.cols.length, roles = [];
+  var stats = [];
+  for(var c=0;c<nc;c++){
+    var vals = grid.rows.map(function(r){ return r[c]||''; }).filter(Boolean);
+    var n = vals.length||1;
+    var ints = vals.filter(function(v){ return /^\d{1,3}$/.test(v); }).length/n;
+    var codes = vals.filter(function(v){ return /[A-Za-z].*\d|\d.*-.*\d|^\d{5,}$/.test(v) && /[-A-Za-z0-9]/.test(v); }).length/n;
+    var avgLen = vals.reduce(function(s,v){ return s+v.length; },0)/n;
+    stats.push({ints:ints, codes:codes, avgLen:avgLen});
+  }
+  var usedPos=false, denomCol=-1, denomLen=-1;
+  for(var c2=0;c2<nc;c2++){ if(stats[c2].avgLen>denomLen){denomLen=stats[c2].avgLen; denomCol=c2;} }
+  for(var c3=0;c3<nc;c3++){
+    if(c3===denomCol && stats[c3].avgLen>=6){ roles.push('denominacio'); continue; }
+    if(stats[c3].ints>=0.5){ roles.push(usedPos?'cant':'pos'); usedPos=true; continue; }
+    if(stats[c3].codes>=0.4){ roles.push('ref'); continue; }
+    roles.push('');
+  }
+  return roles;
+}
+
+// -- Column mapping modal: shown after marking the table; the user assigns each
+//    detected column (in page order) to a field or ignores it. --
+var pendingColMap = null; // {grid, page, sg, roles}
+var lastColRoles = null;  // remembered roles (by column index) for the next mark
+var COL_ROLES = [
+  {v:'', label:'— ignora —'}, {v:'pos', label:'Pos.'}, {v:'ref', label:'Ref.'},
+  {v:'cant', label:'Cant.'}, {v:'denominacio', label:'Denominació'}
+];
+function escHtml(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(ch){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[ch]; }); }
+function openColMap(grid, page, sg){
+  if(!grid.cols.length || !grid.rows.length){ showToast('Cap fila reconeguda en aquesta selecció.'); return; }
+  var roles = guessRoles(grid);
+  if(lastColRoles && lastColRoles.length === grid.cols.length) roles = lastColRoles.slice(); // reuse the last layout
+  pendingColMap = {grid:grid, page:page, sg:sg, roles:roles};
+  renderColMap();
+  els.colMapOverlay.classList.add('open');
+}
+function renderColMap(){
+  var pc = pendingColMap; if(!pc) return;
+  var grid = pc.grid, nc = grid.cols.length, html = '<table class="colMapTable"><thead><tr>';
+  for(var c=0;c<nc;c++){
+    var opts = COL_ROLES.map(function(o){ return '<option value="'+o.v+'"'+(o.v===pc.roles[c]?' selected':'')+'>'+o.label+'</option>'; }).join('');
+    html += '<th data-c="'+c+'" class="'+(pc.roles[c]?'':'ignored')+'"><span class="colIdx">Columna '+(c+1)+'</span><br><select data-c="'+c+'">'+opts+'</select></th>';
+  }
+  html += '</tr></thead><tbody>';
+  grid.rows.slice(0,8).forEach(function(r){
+    html += '<tr>';
+    for(var c2=0;c2<nc;c2++){ html += '<td class="'+(pc.roles[c2]?'':'ignored')+'">'+escHtml(r[c2]||'')+'</td>'; }
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  els.colMapBody.innerHTML = html;
+  els.colMapInfo.textContent = grid.rows.length + (grid.rows.length===1?' fila':' files') + ' · ' + nc + ' columnes detectades';
+  els.colMapBody.querySelectorAll('select').forEach(function(sel){
+    sel.addEventListener('change', function(){ pendingColMap.roles[parseInt(sel.dataset.c,10)] = sel.value; renderColMap(); });
+  });
+}
+function closeColMap(){ els.colMapOverlay.classList.remove('open'); pendingColMap = null; }
+els.colMapCancel.addEventListener('click', closeColMap);
+els.colMapOverlay.addEventListener('click', function(e){ if(e.target === els.colMapOverlay) closeColMap(); });
+els.colMapConfirm.addEventListener('click', function(){
+  var pc = pendingColMap; if(!pc) return;
+  var roles = pc.roles, sg = pc.sg, page = pc.page, added = 0;
+  pc.grid.rows.forEach(function(r){
+    var row = {pos:'', ref:'', cant:'', denominacio:'', page:page};
+    roles.forEach(function(role, c){
+      if(!role) return;
+      var v = (r[c]||'').trim(); if(!v) return;
+      if(role==='denominacio') row.denominacio = (row.denominacio ? row.denominacio+' ' : '') + v;
+      else if(!row[role]) row[role] = v;
+    });
+    if(row.pos || row.ref || row.denominacio){ sg.rows.push(row); added++; }
+  });
+  lastColRoles = roles.slice();
+  sortRowsByPos(sg.rows);
+  closeColMap();
+  renderSubgrupsList();
+  showToast(added ? (added + (added===1?' fila afegida.':' files afegides.')) : 'Cap fila importada.');
+});
 
 // -- Name modal: shared by "create a Conjunt" and "add a Grup to a Conjunt" --
 var pendingNameAction = null; // 'newconjunt' | 'grup'
@@ -1807,15 +1977,8 @@ function renderSubgrupsList(){
     var markBtn = document.createElement('button'); markBtn.textContent = '🎯 Marca les files';
     markBtn.title = 'Arrossega un requadre sobre la taula de recanvis del full';
     markBtn.addEventListener('click', function(){
-      startPicking(firstPageOf(sg, eg), function(lines, page){
-        var added = 0;
-        lines.forEach(function(l){
-          var r = parseLineToRow(l, page);
-          if(r.pos || r.ref){ sg.rows.push(r); added++; }
-        });
-        sortRowsByPos(sg.rows);
-        renderSubgrupsList();
-        showToast(added ? (added + (added===1?' fila afegida.':' files afegides.')) : 'Cap fila reconeguda en aquesta selecció.');
+      startPicking(firstPageOf(sg, eg), function(items, page){
+        openColMap(itemsToGrid(items), page, sg);
       }, 'rows');
     });
     box.appendChild(markBtn);
@@ -1871,6 +2034,7 @@ document.addEventListener('keydown', function(e){
   // The page modal sits on top (e.g. while picking a name from the drawing)
   // and its own keydown handler closes it — don't also close what's beneath.
   if(els.modalOverlay.classList.contains('open')) return;
+  if(els.colMapOverlay.classList.contains('open')){ closeColMap(); return; }
   if(els.nameModalOverlay.classList.contains('open')){ cancelNameModal(); return; }
   if(els.menuImportOverlay.classList.contains('open')){ cancelMenuImport(); return; }
   if(els.grupModalOverlay.classList.contains('open')){ els.reviewCancelBtn.click(); return; }
