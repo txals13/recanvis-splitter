@@ -159,8 +159,14 @@
   .reviewCard{width:min(1100px,94vw); max-height:88vh; overflow:auto;}
   .reviewTop{display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;}
   .reviewTop input[type=text]{width:260px;}
-  .reviewThumbs{display:flex; gap:8px; overflow-x:auto; margin-bottom:16px; padding-bottom:4px;}
+  /* sticky: the thumbnails stay pinned to the top of the scrolling card while
+     the extracted rows scroll underneath */
+  .reviewThumbs{display:flex; gap:8px; overflow-x:auto; margin-bottom:16px; padding:8px 0 4px;
+    position:sticky; top:0; z-index:6; background:var(--panel);
+    box-shadow:0 8px 10px -6px rgba(0,0,0,.5);}
   .reviewThumbs canvas{height:140px; width:auto; border:1px solid var(--border); border-radius:6px; flex-shrink:0;}
+  .reviewThumbs .rtw{display:flex; flex-direction:column; align-items:center; flex-shrink:0; cursor:zoom-in;}
+  .reviewThumbs .rtw span{font-size:11px; color:var(--muted); margin-top:3px; font-family:monospace;}
   table.rowsTable{width:100%; border-collapse:collapse; margin-bottom:12px;}
   table.rowsTable th{text-align:left; font-size:11px; color:var(--muted); padding:4px 6px; border-bottom:1px solid var(--border);}
   table.rowsTable td{padding:4px 6px; border-bottom:1px solid var(--border);}
@@ -2045,8 +2051,13 @@ function renderGrupReviewBody(){
     els.reviewPagesLabel.textContent = 'Pàgines: ' + eg.pages.join(', ');
     els.reviewThumbs.innerHTML = '';
     eg.pages.forEach(function(p){
+      var w = document.createElement('div'); w.className = 'rtw';
+      w.title = 'Obre la pàgina ' + p;
       var cv = document.createElement('canvas');
-      els.reviewThumbs.appendChild(cv);
+      var lbl = document.createElement('span'); lbl.textContent = 'pàg. ' + p;
+      w.appendChild(cv); w.appendChild(lbl);
+      w.addEventListener('click', function(){ openModal(p); });
+      els.reviewThumbs.appendChild(w);
       renderPageToCanvas(p, cv, 260).catch(function(err){ console.warn('preview render', p, err); });
     });
     renderSubgrupsList();
