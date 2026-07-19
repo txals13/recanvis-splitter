@@ -245,9 +245,9 @@
 
 <div id="machinePanel">
   <strong>Màquina</strong>
-  <input type="text" id="machSerial" placeholder="Núm. de sèrie">
-  <input type="text" id="machModel" placeholder="Model">
-  <input type="text" id="machClient" placeholder="Client">
+  <input type="text" id="machSerial" placeholder="Núm. de sèrie"><button id="pickSerialBtn" title="Tria el núm. de sèrie arrossegant sobre la portada">🎯</button>
+  <input type="text" id="machModel" placeholder="Model"><button id="pickModelBtn" title="Tria el model arrossegant sobre la portada">🎯</button>
+  <input type="text" id="machClient" placeholder="Client"><button id="pickClientBtn" title="Tria el client arrossegant sobre la portada">🎯</button>
   <span id="portadaInfo">Portada: —</span>
   <button id="portadaClearBtn" style="display:none;">Treu portada</button>
   <span id="colsInfo" style="font-size:12px; color:var(--muted);">Columnes: —</span>
@@ -453,6 +453,9 @@ var els = {
   machSerial: document.getElementById('machSerial'),
   machModel: document.getElementById('machModel'),
   machClient: document.getElementById('machClient'),
+  pickSerialBtn: document.getElementById('pickSerialBtn'),
+  pickModelBtn: document.getElementById('pickModelBtn'),
+  pickClientBtn: document.getElementById('pickClientBtn'),
   portadaInfo: document.getElementById('portadaInfo'),
   portadaClearBtn: document.getElementById('portadaClearBtn'),
   colsInfo: document.getElementById('colsInfo'),
@@ -887,6 +890,7 @@ function endPicking(){
   state.pickingCancel = null;
   state.pickItems = [];
   pickDrag = null;
+  stopPickScroll();
   els.pickRect.style.display = 'none';
   els.modalPickHint.style.display = 'none';
   els.modalImgWrap.classList.remove('picking');
@@ -904,22 +908,51 @@ function updatePickRect(){
   els.pickRect.style.width = Math.abs(d.x1 - d.x0) + 'px';
   els.pickRect.style.height = Math.abs(d.y1 - d.y0) + 'px';
 }
+// While dragging a selection, auto-scroll #modalImgWrap when the pointer nears
+// (or passes) its edges, so a table taller/wider than the window can be marked
+// in one drag. Each tick re-derives the moving corner from the last pointer
+// position, because scrolling shifts the canvas under a pointer that isn't
+// moving — this also keeps the rectangle glued during wheel-scrolling mid-drag.
+var pickScrollTimer = null;
+function stopPickScroll(){ if(pickScrollTimer){ clearInterval(pickScrollTimer); pickScrollTimer = null; } }
+function pickAutoScrollTick(){
+  var d = pickDrag;
+  if(!d || d.cx === undefined){ return; }
+  var wrap = els.modalImgWrap, wr = wrap.getBoundingClientRect();
+  var EDGE = 48, MAXV = 28;
+  function vel(over){ return Math.ceil(Math.min(MAXV, Math.max(0, over) * 0.35)); }
+  var dy = 0, dx = 0;
+  if(d.cy > wr.bottom - EDGE) dy = vel(d.cy - (wr.bottom - EDGE));
+  else if(d.cy < wr.top + EDGE) dy = -vel((wr.top + EDGE) - d.cy);
+  if(d.cx > wr.right - EDGE) dx = vel(d.cx - (wr.right - EDGE));
+  else if(d.cx < wr.left + EDGE) dx = -vel((wr.left + EDGE) - d.cx);
+  if(dx) wrap.scrollLeft += dx;
+  if(dy) wrap.scrollTop += dy;
+  var r = els.modalCanvas.getBoundingClientRect();
+  d.x1 = Math.max(0, Math.min(d.cx - r.left, r.width));
+  d.y1 = Math.max(0, Math.min(d.cy - r.top, r.height));
+  updatePickRect();
+}
 els.modalCanvas.addEventListener('mousedown', function(e){
   if(!state.pickingTarget || e.button !== 0) return;
   e.preventDefault();
   var r = els.modalCanvas.getBoundingClientRect();
   var x = e.clientX - r.left, y = e.clientY - r.top;
-  pickDrag = { x0:x, y0:y, x1:x, y1:y };
+  pickDrag = { x0:x, y0:y, x1:x, y1:y, cx:e.clientX, cy:e.clientY };
+  stopPickScroll();
+  pickScrollTimer = setInterval(pickAutoScrollTick, 30);
   updatePickRect();
 });
 document.addEventListener('mousemove', function(e){
   if(!pickDrag) return;
+  pickDrag.cx = e.clientX; pickDrag.cy = e.clientY;
   var r = els.modalCanvas.getBoundingClientRect();
   pickDrag.x1 = Math.max(0, Math.min(e.clientX - r.left, r.width));
   pickDrag.y1 = Math.max(0, Math.min(e.clientY - r.top, r.height));
   updatePickRect();
 });
 document.addEventListener('mouseup', function(){
+  stopPickScroll();
   if(!pickDrag || !state.pickingTarget) { pickDrag = null; return; }
   var d = pickDrag; pickDrag = null;
   els.pickRect.style.display = 'none';
@@ -1778,6 +1811,25 @@ function renderMachinePanel(){
 [['machSerial','serial'],['machModel','model'],['machClient','client']].forEach(function(pair){
   els[pair[0]].addEventListener('input', function(){ state.machine[pair[1]] = els[pair[0]].value; });
   els[pair[0]].addEventListener('change', function(){ persistConjunts(); });
+});
+// 🎯 pick a machine field's value straight off the document — from the marked
+// portada when there is one, else the first selected page. Programmatic value
+// changes don't fire the inputs' listeners, so state + persist are explicit.
+function machPickSource(){
+  if(state.portadaPage) return state.portadaPage;
+  var sel = Array.from(state.selected).sort(function(a,b){ return a-b; })[0];
+  return sel || (state.numPages ? 1 : null);
+}
+[['pickSerialBtn','machSerial','serial'],['pickModelBtn','machModel','model'],['pickClientBtn','machClient','client']].forEach(function(t){
+  els[t[0]].addEventListener('click', function(){
+    startPicking(machPickSource(), function(text){
+      text = (text||'').trim();
+      if(!text) return;
+      els[t[1]].value = text;
+      state.machine[t[2]] = text;
+      persistConjunts();
+    });
+  });
 });
 els.portadaClearBtn.addEventListener('click', function(){ state.portadaPage = null; persistConjunts(); renderMachinePanel(); });
 els.redefineColsBtn.addEventListener('click', function(){
