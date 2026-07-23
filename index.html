@@ -328,6 +328,7 @@
         <button id="deleteConjuntBtn">Elimina el conjunt</button>
       </div>
       <div class="right">
+        <button id="exportConjuntSvgBtn" title="Converteix les pàgines del conjunt a SVG vectorial (un fitxer per pàgina, en un ZIP)">⬇ Exporta (SVG)</button>
         <button id="exportConjuntPdfBtn">⬇ Exporta (PDF)</button>
         <button class="primary" id="exportConjuntBtn">⬇ Exporta (JSON)</button>
       </div>
@@ -482,6 +483,7 @@ var els = {
   deleteConjuntBtn: document.getElementById('deleteConjuntBtn'),
   exportConjuntBtn: document.getElementById('exportConjuntBtn'),
   exportConjuntPdfBtn: document.getElementById('exportConjuntPdfBtn'),
+  exportConjuntSvgBtn: document.getElementById('exportConjuntSvgBtn'),
   exportCombinedPdfBtn: document.getElementById('exportCombinedPdfBtn'),
   exportCatalogPdfBtn: document.getElementById('exportCatalogPdfBtn'),
   remapPagesChk: document.getElementById('remapPagesChk'),
@@ -571,6 +573,8 @@ function resetApp(){
   state.conjunts = []; state.editingGrup = null; state.currentConjuntId = null;
   state.pendingMenuImport = null;
   state.machine = emptyMachine(); state.portadaPage = null; state.colLayout = null;
+  if(muDoc != null && muMod){ try{ muMod.freeDocument(muDoc); }catch(e){} }
+  muDoc = null; muDocFor = null; // the wasm module itself is kept for the session
   els.grid.innerHTML = '';
   els.header.style.display = 'none';
   els.footer.style.display = 'none';
@@ -2513,6 +2517,91 @@ function exportConjuntPdf(c, idx){
     return res.count;
   });
 }
+
+// -- SVG export: each page of the conjunt as a vector SVG (crisp zoom, usable
+//    without pdf.js), packed in a ZIP. Conversion runs fully in-browser with
+//    MuPDF compiled to WebAssembly (the same engine as mutool). The ~4.5MB
+//    wasm is fetched lazily on first use and the module is kept for the
+//    session; the opened document is invalidated when another PDF is loaded.
+//    Note: this build resolves its .wasm relative to the PAGE, so the binary
+//    is fetched explicitly and handed over via wasmBinary.
+var MUPDF_BASE = 'https://unpkg.com/mupdf-js@1.1.1/dist/';
+var muMod = null, muDoc = null, muDocFor = null;
+function getMuDoc(){
+  var p = Promise.resolve();
+  if(!muMod){
+    p = loadScript([MUPDF_BASE + 'libmupdf.js']).then(function(){
+      return fetch(MUPDF_BASE + 'libmupdf.wasm').then(function(r){
+        if(!r.ok) throw new Error('no s\'ha pogut baixar el motor SVG (' + r.status + ')');
+        return r.arrayBuffer();
+      });
+    }).then(function(wasm){
+      return mupdf({wasmBinary: wasm});
+    }).then(function(M){ muMod = M; });
+  }
+  return p.then(function(){
+    if(!muDoc || muDocFor !== state.fileName){
+      if(muDoc != null){ try{ muMod.freeDocument(muDoc); }catch(e){} }
+      muMod.FS.writeFile('manual.pdf', state.pdfBytes);
+      muDoc = muMod.openDocument('manual.pdf');
+      muDocFor = state.fileName;
+    }
+    return {M: muMod, doc: muDoc};
+  });
+}
+function loadJSZip(){
+  return new Promise(function(res){
+    if(window.JSZip){ res(window.JSZip); return; }
+    loadScript([
+      'https://unpkg.com/jszip@3.10.1/dist/jszip.min.js',
+      'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+    ]).then(function(){ res(window.JSZip || null); }).catch(function(){ res(null); });
+  });
+}
+function pad3(n){ n = String(n); while(n.length < 3) n = '0' + n; return n; }
+// Sequential with a yield between pages so the progress label repaints.
+function convertPagesToZip(M, doc, pages, zip, onProgress){
+  var renum = remapOn(); // match the JSON pairing: renumbered names when checked
+  var i = 0;
+  return new Promise(function(resolve, reject){
+    (function step(){
+      if(i >= pages.length){ resolve(); return; }
+      try{
+        if(onProgress) onProgress(i + 1, pages.length);
+        var svg = M.drawPageAsSVG(doc, pages[i]);
+        zip.file('pag_' + pad3(renum ? (i + 1) : pages[i]) + '.svg', svg);
+        i++;
+        setTimeout(step, 0);
+      }catch(e){ reject(e); }
+    })();
+  });
+}
+els.exportConjuntSvgBtn.addEventListener('click', function(){
+  var c = state.conjunts.find(function(x){ return x.id === state.currentConjuntId; });
+  if(!c){ showToast('Cap conjunt obert.'); return; }
+  var idx = state.conjunts.indexOf(c);
+  var pages = conjuntPages(c);
+  if(!pages.length){ showToast('Aquest conjunt no té cap pàgina assignada.'); return; }
+  var btn = els.exportConjuntSvgBtn, lbl = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Preparant el motor…';
+  Promise.all([getMuDoc(), loadJSZip()]).then(function(res){
+    var M = res[0].M, doc = res[0].doc, JSZip = res[1];
+    if(!JSZip) throw new Error('no s\'ha pogut carregar JSZip');
+    var zip = new JSZip();
+    return convertPagesToZip(M, doc, pages, zip, function(i, n){
+      btn.textContent = 'Convertint… (' + i + '/' + n + ')';
+    }).then(function(){
+      btn.textContent = 'Empaquetant…';
+      return zip.generateAsync({type: 'blob', compression: 'DEFLATE'});
+    });
+  }).then(function(blob){
+    var fn = conjuntBaseName(c, idx) + '_svg.zip';
+    dlBytes(blob, fn, 'application/zip');
+    showToast('SVG generat: ' + fn + ' (' + pages.length + (pages.length === 1 ? ' pàgina).' : ' pàgines).'));
+  }).catch(function(err){
+    showToast('Error convertint a SVG: ' + err.message, 4000);
+  }).then(function(){ btn.disabled = false; btn.textContent = lbl; });
+});
 els.exportConjuntBtn.addEventListener('click', function(){
   var c = state.conjunts.find(function(x){ return x.id === state.currentConjuntId; });
   if(!c){ showToast('Cap conjunt obert.'); return; }
