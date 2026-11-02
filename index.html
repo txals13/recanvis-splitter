@@ -1202,7 +1202,8 @@ function extractRowsFromPage(page){
   });
 }
 
-// A page's own "SUBGRUPO <name>" title-block field, when present.
+// A page's own "SUBGRUPO <name>" title-block field, when present; on PRODEC
+// drawings, the DENOMINACIÓN field instead.
 function extractSubgrupFromPage(page){
   return getPageLines(page).then(function(lines){
     lines = lines.filter(function(l){ return !/MANUAL\s+DE\s+INSTRU/i.test(l); });
@@ -1210,8 +1211,45 @@ function extractSubgrupFromPage(page){
       var m = lines[i].match(/\bSUBGRUPO\s+(.+)$/i);
       if(m) return m[1].trim();
     }
-    return '';
+    return prodecTitleBlock(page).then(function(tb){ return tb ? tb.name : ''; });
   }).catch(function(){ return ''; });
+}
+
+// PRODEC's own drawings carry the parts list on the sheet under a "Lista de
+// piezas" title, and their title block prints each label small at the top of
+// its box with the value underneath — DENOMINACIÓN → "GRUPO GUIAS LATERALES",
+// "Nº de pieza:" → "02.20.17.06D01" — rather than on the same line as the old
+// manuals' "SUBGRUPO Bancada Dr.". Returns {name, num}, or null on any page
+// that isn't one of these drawings (so the old manuals are left untouched).
+function prodecTitleBlock(page){
+  return getPageItemsFull(page).then(function(items){
+    var flat = items.filter(function(it){ return it.rot === 0; });
+    function norm(s){ return (s||'').trim().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').toUpperCase(); }
+    if(!flat.some(function(it){ return norm(it.str) === 'LISTA DE PIEZAS'; })) return null;
+    // The parts-list header has its own "Nº DE PIEZA" column label: skip any
+    // label sharing its baseline with other table-header labels.
+    function inTableHeader(it){
+      return flat.filter(function(o){ return o !== it && Math.abs(o.py - it.py) < 3 && headerRoleOf(o.str) !== null; }).length >= 2;
+    }
+    function valueBelow(labelRe){
+      var labs = flat.filter(function(it){ return labelRe.test(norm(it.str)) && !inTableHeader(it); });
+      if(!labs.length) return '';
+      var lab = labs.reduce(function(a,b){ return b.py < a.py ? b : a; }); // lowest = the title block
+      // Nearest line under the label, within its own box (not the next box
+      // over, nor the row below).
+      var cands = flat.filter(function(it){
+        var dy = lab.py - it.py;
+        return it !== lab && dy > 1 && dy < 45 && it.px + it.pw > lab.px - 20 && it.px < lab.px + 300;
+      });
+      if(!cands.length) return '';
+      var top = Math.max.apply(null, cands.map(function(c){ return c.py; }));
+      return cands.filter(function(c){ return Math.abs(c.py - top) < 3; })
+        .sort(function(a,b){ return a.px - b.px; })
+        .map(function(c){ return c.str; }).join(' ').replace(/\s+/g,' ').trim();
+    }
+    var num = valueBelow(/^N\.?[º°]? ?DE PIEZA:?$/);
+    return { name: valueBelow(/^DENOMINACION:?$/), num: /\d/.test(num) ? num : '' };
+  }).catch(function(){ return null; });
 }
 
 // The drawing's own reference code from the title block "Nº" field, e.g.
@@ -1229,7 +1267,7 @@ function extractSubgrupNumFromPage(page){
       var m = lines[i].match(/[A-Z]-\d+\s+([A-Z0-9]+(?:-[A-Z0-9]+)+)/);
       if(m) return m[1];
     }
-    return '';
+    return prodecTitleBlock(page).then(function(tb){ return tb ? tb.num : ''; });
   }).catch(function(){ return ''; });
 }
 
@@ -1269,7 +1307,9 @@ function sortRowsByPos(rows){
 function buildSubgrupsForPages(pages){
   return Promise.all(pages.map(function(p){
     return Promise.all([extractRows(p), extractSubgrupFromPage(p), extractSubgrupNumFromPage(p)]).then(function(res){
-      return { page: p, name: stripTitleLabel(res[1] || ''), num: res[2] || '', rows: res[0] };
+      // The extractors already leave the "SUBGRUPO" label out, so the name is
+      // kept exactly as printed ("Grupo filtro", "GRUPO GUIAS LATERALES").
+      return { page: p, name: (res[1] || '').trim(), num: res[2] || '', rows: res[0] };
     });
   })).then(function(perPage){
     var subs = [];
@@ -1334,6 +1374,12 @@ function extractMenuHeadings(page){
 //    of the selection — always editable before confirming. --
 function suggestNameFromPages(pages){
   if(!pages.length) return Promise.resolve('');
+  return prodecTitleBlock(pages[0]).then(function(tb){
+    if(tb && tb.name) return tb.name;
+    return suggestNameFromLines(pages);
+  });
+}
+function suggestNameFromLines(pages){
   return getPageLines(pages[0]).then(function(lines){
     // Every page repeats a running header like "<chapter> MANUAL DE
     // INSTRUCCIONES SECCIÓN <n>" — never a useful name, and it can contain
@@ -1475,13 +1521,15 @@ function rowFromCells(cells, roles, page){
 // the data itself (labels are centered, data is left-aligned), per page, so
 // tables that differ between drawings are no problem. Drawing sheets carry an
 // EMPTY template header in the title block — those correctly yield 0 rows.
+// Also covers PRODEC's own drawings, whose "Lista de piezas" header reads
+// ELEM. / CTDAD. / Nº DE PIEZA / DESCRIPCIÓN / CAT.
 function headerRoleOf(s){
-  s = (s||'').trim().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\.$/,'').toUpperCase();
-  if(/^POS$/.test(s)) return 'pos';
-  if(/^(CANT|CANTIDAD|CTD|UDS)$/.test(s)) return 'cant';
+  s = (s||'').trim().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\.$/,'').replace(/\s+/g,' ').toUpperCase();
+  if(/^(POS|ELEM|ELEMENTO)$/.test(s)) return 'pos';
+  if(/^(CANT|CANTIDAD|CTD|CTDAD|UDS)$/.test(s)) return 'cant';
   if(/^(DENOMINACION|DESCRIPCION|DESIGNACION)$/.test(s)) return 'denominacio';
-  if(/^(NUMERO|N[º°]|CODIGO|REFERENCIA|REF|PLANO)$/.test(s)) return 'ref';
-  if(/^(MATERIAL|PROCEDENCIA|OBSERVACIONES|MARCA|NORMA)$/.test(s)) return '';
+  if(/^(NUMERO|N[º°]|CODIGO|REFERENCIA|REF|PLANO|N\.?[º°]? ?DE PIEZA)$/.test(s)) return 'ref';
+  if(/^(MATERIAL|PROCEDENCIA|OBSERVACIONES|MARCA|NORMA|CAT|CATEGORIA)$/.test(s)) return '';
   return null; // not a table-header label
 }
 // Maps an item into the table's own axes: u = along the reading direction,
