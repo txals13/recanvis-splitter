@@ -823,7 +823,7 @@ function renderModalPage(page){
     var ctx = els.modalCanvas.getContext('2d');
     var renderP = pdfPage.render({canvasContext: ctx, viewport: viewport}).promise;
     if(state.pickingTarget){
-      pdfPage.getTextContent().then(function(tc){ state.pickItems = buildPickItems(tc, viewport); });
+      pdfPage.getTextContent().then(function(tc){ state.pickItems = buildPickItems(repairCadGlyphs(tc), viewport); });
     }
     return renderP;
   });
@@ -1153,13 +1153,68 @@ function uid(){
   return Date.now().toString(36) + Math.random().toString(36).slice(2,8);
 }
 
+// -- Accented characters on AutoCAD-plotted sheets --
+// Manuals whose drawings are plotted straight from AutoCAD embed every
+// accented character in a font of its own, a one-glyph subset with no usable
+// ToUnicode map, so pdf.js hands back the glyph's own code as if it were the
+// character: "DESCRIPCIÓN" arrives as "DESCRIPCI" + "Ï" + "N". Nothing in the
+// file says what the glyph really is, so a table is the only way back. The
+// values below were read off the sheets and checked against the words they
+// turn up in -- DESCRIPCIÓN, DENOMINACIÓN, TETÓN, Nº DE PIEZA, PESTAÑA,
+// SIMÉTRICO, GUÍA, MECÁNICO, VÁSTAGO, ARANDELA Ø21, módulo, DISTRIBUÏDORS,
+// está, *Varía* -- and a glyph that isn't listed is left alone rather than
+// guessed at.
+var CAD_GLYPHS = {
+  'e':'É', 'f':'Ñ', 'i':'á', 't':'í', 'y':'ó',
+  '\u0091':'Ø', '\u009e':'º', '\u00ac':'À', '\u00c8':'Á',
+  '\u00cb':'Í', '\u00cd':'Ï', '\u00cf':'Ó'
+};
+// Half the table's keys are ordinary letters, so what gets repaired has to be
+// decided by the font and not by the character or by where it sits: AutoCAD
+// splits a run on its own kerning as well, which leaves perfectly legitimate
+// lone letters glued to the word they belong to ("CREMALLERA" + "m" +
+// "ódulo"). The giveaway is the font itself: the accents subset never draws
+// anything that reads as ordinary text -- no letter, digit or space from
+// outside the table, only its own glyphs and the odd unmapped one -- while
+// the font carrying the words always brings plain letters along with them.
+// Per page, because the subset is given a new font id on every sheet.
+function accentFontNames(tc){
+  var byFont = {};
+  tc.items.forEach(function(it){
+    var s = it.str ? it.str.trim() : '';
+    if(!s) return;
+    (byFont[it.fontName] = byFont[it.fontName] || []).push(s);
+  });
+  var names = {};
+  Object.keys(byFont).forEach(function(fn){
+    var noPlainText = byFont[fn].every(function(s){
+      return s.split('').every(function(ch){ return CAD_GLYPHS[ch] || !/[0-9A-Za-z\s]/.test(ch); });
+    });
+    if(noPlainText) names[fn] = true;
+  });
+  return names;
+}
+function repairCadGlyphs(tc){
+  var accents = accentFontNames(tc);
+  tc.items.forEach(function(it){
+    if(!it.str || !accents[it.fontName]) return;
+    it.str = it.str.replace(/[\s\S]/g, function(ch){ return CAD_GLYPHS[ch] || ch; });
+  });
+  return tc;
+}
+// Every read of a page's text goes through here, so the interface, the
+// extraction and the exported catalogue all see the same words.
+function getTextContentFixed(page){
+  return state.pdfDoc.getPage(page).then(function(pdfPage){
+    return pdfPage.getTextContent();
+  }).then(repairCadGlyphs);
+}
+
 // -- Page text helper: reconstructs reading-order lines from pdf.js text
 //    items, grouping by Y coordinate. Shared by row extraction and name
 //    suggestion so both see the same line reconstruction. --
 function getPageLines(page){
-  return state.pdfDoc.getPage(page).then(function(pdfPage){
-    return pdfPage.getTextContent();
-  }).then(function(tc){
+  return getTextContentFixed(page).then(function(tc){
     var lines = [];
     tc.items.forEach(function(it){
       var str = it.str;
@@ -1215,59 +1270,78 @@ function extractSubgrupFromPage(page){
   }).catch(function(){ return ''; });
 }
 
-// PRODEC's own drawings carry the parts list on the sheet under a "Lista de
-// piezas" title, and their title block prints each label small at the top of
-// its box with the value underneath — DENOMINACIÓN → "GRUPO GUIAS LATERALES",
-// "Nº de pieza:" → "02.20.17.06D01" — rather than on the same line as the old
-// manuals' "SUBGRUPO Bancada Dr.". Returns {name, num}, or null on any page
-// that isn't one of these drawings (so the old manuals are left untouched).
+// PRODEC's own drawings carry the parts list on the sheet itself, and their
+// title block prints each label small at the top of its box with the value
+// underneath — DENOMINACIÓN → "GRUPO GUIAS LATERALES", "Nº de pieza:" →
+// "02.20.17.06D01" — rather than on the same line as the old manuals'
+// "SUBGRUPO Bancada Dr.". Returns {name, num}, or null on any page that isn't
+// one of these drawings (so the old manuals are left untouched).
 function prodecTitleBlock(page){
   return getPageItemsFull(page).then(function(items){
-    var flat = items.filter(function(it){ return it.rot === 0; });
+    var flat = mergeLabelRuns(items).filter(function(it){ return it.rot === 0; });
     function norm(s){ return (s||'').trim().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').toUpperCase(); }
-    if(!flat.some(function(it){ return norm(it.str) === 'LISTA DE PIEZAS'; })) return null;
+    // What marks one of these sheets is that the parts list is drawn ON it:
+    // either under its own "Lista de piezas" title, or -- newer sheets, where
+    // the list sits straight in the title block -- with no title at all, just
+    // the printed table header. Both are a drawing carrying its own list, and
+    // neither can happen on the old manuals' separate list pages.
+    if(!flat.some(function(it){ return norm(it.str) === 'LISTA DE PIEZAS'; }) &&
+       !findPartsHeaders(items).length) return null;
     // The parts-list header has its own "Nº DE PIEZA" column label: skip any
     // label sharing its baseline with other table-header labels.
     function inTableHeader(it){
       return flat.filter(function(o){ return o !== it && Math.abs(o.py - it.py) < 3 && headerRoleOf(o.str) !== null; }).length >= 2;
     }
-    function valueBelow(labelRe){
+    function valueBelow(labelRe, multiline){
       var labs = flat.filter(function(it){ return labelRe.test(norm(it.str)) && !inTableHeader(it); });
       if(!labs.length) return '';
       var lab = labs.reduce(function(a,b){ return b.py < a.py ? b : a; }); // lowest = the title block
-      // Nearest line under the label, within its own box (not the next box
-      // over, nor the row below).
+      // Lines under the label, within its own box (not the next box over, nor
+      // the row below).
       var cands = flat.filter(function(it){
         var dy = lab.py - it.py;
         return it !== lab && dy > 1 && dy < 45 && it.px + it.pw > lab.px - 20 && it.px < lab.px + 300;
       });
       if(!cands.length) return '';
-      var top = Math.max.apply(null, cands.map(function(c){ return c.py; }));
-      return cands.filter(function(c){ return Math.abs(c.py - top) < 3; })
-        .sort(function(a,b){ return a.px - b.px; })
-        .map(function(c){ return c.str; }).join(' ').replace(/\s+/g,' ').trim();
+      var ys = [];
+      cands.forEach(function(c){ if(!ys.some(function(y){ return Math.abs(y - c.py) < 3; })) ys.push(c.py); });
+      ys.sort(function(a,b){ return b - a; });
+      // A long denomination is set over two lines ("GRUPO CARRO FIJO SOPORTE
+      // CINTAS EN" / "ALUMINIO"), so the name is read on past the first line
+      // while the next one follows at the box's own line pitch; a wider jump
+      // means the next field of the title block, not the rest of the name.
+      var keep = [ys[0]];
+      if(multiline) for(var i=1;i<ys.length && keep[keep.length-1] - ys[i] <= 20;i++) keep.push(ys[i]);
+      return keep.map(function(y){
+        return cands.filter(function(c){ return Math.abs(c.py - y) < 3; })
+          .sort(function(a,b){ return a.px - b.px; })
+          .map(function(c){ return c.str; }).join(' ');
+      }).join(' ').replace(/\s+/g,' ').trim();
     }
     var num = valueBelow(/^N\.?[º°]? ?DE PIEZA:?$/);
-    return { name: valueBelow(/^DENOMINACION:?$/), num: /\d/.test(num) ? num : '' };
+    return { name: valueBelow(/^DENOMINACION:?$/, true), num: /\d/.test(num) ? num : '' };
   }).catch(function(){ return null; });
 }
 
-// The drawing's own reference code from the title block "Nº" field, e.g.
-// "4726-01-00". In the reconstructed text this value ends up on the same
-// line as the DIN paper-size code right before it (e.g. "A-4 4726-01-00"),
-// so anchoring on that prefix avoids matching a part's own reference code
-// elsewhere on the page (individual parts can have similarly-shaped codes
-// like "4726-01-01").
+// The drawing's own reference code. A sheet with a "Nº de pieza:" field in its
+// title block has it printed outright, so that is read first. Older manuals
+// label the field just "Nº", which is too short to anchor on: there the value
+// ends up on the same reconstructed line as the DIN paper-size code right
+// before it (e.g. "A-4 4726-01-00"), and that prefix is what keeps the match
+// off a part's own reference code elsewhere on the page (individual parts can
+// have similarly-shaped codes like "4726-01-01").
 function extractSubgrupNumFromPage(page){
-  return getPageLines(page).then(function(lines){
-    for(var i=0;i<lines.length;i++){
-      // The code after the DIN paper-size prefix (e.g. "A-4 …"). Capture a
-      // dash-separated code whose segments may be letters and/or digits
-      // ("4726-01-00", "ZO-200-95", "AB-1234-01"), not just all-digit ones.
-      var m = lines[i].match(/[A-Z]-\d+\s+([A-Z0-9]+(?:-[A-Z0-9]+)+)/);
-      if(m) return m[1];
-    }
-    return prodecTitleBlock(page).then(function(tb){ return tb ? tb.num : ''; });
+  return prodecTitleBlock(page).then(function(tb){
+    if(tb && tb.num) return tb.num;
+    return getPageLines(page).then(function(lines){
+      for(var i=0;i<lines.length;i++){
+        // Capture a dash-separated code whose segments may be letters and/or
+        // digits ("4726-01-00", "ZO-200-95"), not just all-digit ones.
+        var m = lines[i].match(/[A-Z]-\d+\s+([A-Z0-9]+(?:-[A-Z0-9]+)+)/);
+        if(m) return m[1];
+      }
+      return '';
+    });
   }).catch(function(){ return ''; });
 }
 
@@ -1481,7 +1555,17 @@ function itemsToGrid(items){
 }
 // Splits items into text cells using the given column x-starts, rows top→bottom.
 function rowsFromItems(items, cols){
-  function colOf(px){ var idx=0; for(var k=0;k<cols.length;k++){ if(px >= cols[k]-2) idx=k; else break; } return idx; }
+  // Values are centred in their column, so a column's detected left edge is
+  // set by its narrowest values and a wider one in the same column starts a
+  // little to the left of it -- enough that a two-digit quantity in a column
+  // of single digits was landing in the Pos. column and taking its row with
+  // it. One character of the value's own width is the slack that costs
+  // nothing: still far less than any gap between two columns.
+  function colOf(it){
+    var len = (it.str || '').length;
+    var slack = Math.max(2, len ? Math.min((it.pw||0)/2, (it.pw||0)/len) : 2);
+    var idx=0; for(var k=0;k<cols.length;k++){ if(it.px >= cols[k]-slack) idx=k; else break; } return idx;
+  }
   var lines = [];
   items.forEach(function(it){
     var line = null;
@@ -1492,7 +1576,7 @@ function rowsFromItems(items, cols){
   lines.sort(function(a,b){ return b.py - a.py; });
   return lines.map(function(l){
     var cells = []; for(var k=0;k<cols.length;k++) cells.push([]);
-    l.items.forEach(function(it){ cells[colOf(it.px)].push(it); });
+    l.items.forEach(function(it){ cells[colOf(it)].push(it); });
     return cells.map(function(cell){
       cell.sort(function(a,b){ return a.px - b.px; });
       var t='', prevEnd=null;
@@ -1542,7 +1626,7 @@ function uvOf(it){
 }
 // Raw text items of a page with their rotation (from the text transform).
 function getPageItemsFull(page){
-  return state.pdfDoc.getPage(page).then(function(pdfPage){ return pdfPage.getTextContent(); }).then(function(tc){
+  return getTextContentFixed(page).then(function(tc){
     var items = [];
     tc.items.forEach(function(it){
       if(!it.str || !it.str.trim()) return;
@@ -1553,10 +1637,49 @@ function getPageItemsFull(page){
     return items;
   });
 }
+// A printed label can reach us split across several text items: the accents
+// font breaks a word in three ("DESCRIPCI" + "Ó" + "N") and AutoCAD splits on
+// its own kerning as well ("Nº" + "DE PIEZA"). Header labels and title-block
+// labels are matched whole, so the runs of a baseline are glued back together
+// first. The test is the gap against the run's own character width: less than
+// one character apart is inside a word or a single space, wider than that is a
+// gap between two columns, which must stay a gap.
+function mergeLabelRuns(items){
+  var lines = [];
+  items.forEach(function(it){
+    var uv = uvOf(it), line = null;
+    for(var i=0;i<lines.length;i++){
+      if(lines[i].rot === it.rot && Math.abs(lines[i].v - uv.v) < 3){ line = lines[i]; break; }
+    }
+    if(!line){ line = {rot: it.rot, v: uv.v, items: []}; lines.push(line); }
+    line.items.push({it: it, u: uv.u});
+  });
+  var out = [];
+  lines.forEach(function(line){
+    line.items.sort(function(a,b){ return a.u - b.u; });
+    var cur = null;
+    line.items.forEach(function(e){
+      var w = e.it.pw || 0, charW = e.it.str.length ? w / e.it.str.length : 0;
+      var gap = cur ? e.u - cur.end : Infinity;
+      if(cur && gap < Math.max(1.5, Math.max(cur.charW, charW) * 0.9)){
+        cur.item.str += (gap > 1 ? ' ' : '') + e.it.str;
+        cur.end = e.u + w;
+        cur.item.pw = cur.end - cur.u;
+        cur.charW = Math.max(cur.charW, charW);
+      } else {
+        cur = {u: e.u, end: e.u + w, charW: charW,
+               item: {px: e.it.px, py: e.it.py, pw: w, str: e.it.str, rot: e.it.rot}};
+        out.push(cur.item);
+      }
+    });
+  });
+  return out;
+}
 // Finds parts-table headers: label items sharing a baseline (in their own
 // orientation), needing POS plus at least two more labels.
 function findPartsHeaders(items){
   var headers = [];
+  items = mergeLabelRuns(items);
   [0,90,180,270].forEach(function(rot){
     var labs = [];
     items.forEach(function(it){
@@ -1582,6 +1705,29 @@ function findPartsHeaders(items){
   });
   return headers;
 }
+// Keeps only the lines that open with a Pos. value. On a sheet that carries
+// its parts list inside the title block, the region past the header line holds
+// the whole title block too -- "Hoja 1 de 1", DENOMINACIÓN, the drawing's own
+// Nº -- all of it in the same band as the table, and that ink filled the gap
+// between Pos. and Cant. well enough that the two came out as a single
+// column. A parts row always opens with its position number, left of the
+// second column's label; a line that doesn't is not part of the table.
+function keepPosLines(reg, posMax){
+  var lines = [];
+  reg.forEach(function(it){
+    var l = null;
+    for(var i=0;i<lines.length;i++){ if(Math.abs(lines[i].py - it.py) < 3){ l = lines[i]; break; } }
+    if(!l){ l = {py: it.py, items: []}; lines.push(l); }
+    l.items.push(it);
+  });
+  var out = [];
+  lines.forEach(function(l){
+    l.items.sort(function(a,b){ return a.px - b.px; });
+    var first = l.items[0];
+    if(first.px <= posMax && /^\d+(\.\d+)?$/.test(first.str.trim())) out = out.concat(l.items);
+  });
+  return out;
+}
 // Extracts the rows of the table anchored at `hdr`. The data can sit on either
 // side of the header line (lists grow away from the title block) — both are
 // tried and the side that parses into more valid rows wins. Columns come from
@@ -1590,6 +1736,7 @@ function findPartsHeaders(items){
 function extractTableRows(items, hdr, page){
   var labs = hdr.labs;
   var uMin = labs[0].u - 25, uMax = labs[labs.length-1].u + (labs[labs.length-1].w||0) + 120;
+  var posMax = labs.length > 1 ? labs[1].u - 2 : uMax;
   function parseSide(above){
     var reg = [];
     items.forEach(function(it){
@@ -1599,6 +1746,7 @@ function extractTableRows(items, hdr, page){
       var dv = uv.v - hdr.v;
       if(above ? dv > 2 : dv < -2) reg.push({px: uv.u, py: uv.v, pw: it.pw, str: it.str});
     });
+    reg = keepPosLines(reg, posMax);
     if(!reg.length) return [];
     var grid = itemsToGrid(reg), roles;
     if(grid.cols.length === labs.length){ roles = labs.map(function(l){ return l.role; }); }
