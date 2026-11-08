@@ -82,7 +82,7 @@
     display:none; align-items:center; justify-content:center; flex-direction:column;
   }
   #modalOverlay.open{display:flex;}
-  #modalTop{display:flex; align-items:center; gap:16px; color:var(--text); margin-bottom:10px; flex-wrap:wrap;}
+  #modalTop{display:flex; align-items:center; gap:10px; color:var(--text); margin-bottom:10px; flex-wrap:wrap;}
   #modalPickHint{display:none; background:var(--accent2); color:#fff; padding:6px 12px; border-radius:6px; font-size:13px;}
   #modalImgWrap.picking canvas{cursor:crosshair;}
   #modalImgWrap{max-width:92vw; max-height:78vh; overflow:auto; background:#0a0b0e; border-radius:8px; position:relative;}
@@ -149,6 +149,17 @@
   #tablesPanelHeader{display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;}
   #tablesPanelHeader strong{font-size:13px; margin-right:4px;}
   #tableChipsList{display:flex; flex-wrap:wrap; gap:10px;}
+  #refsPanel{
+    display:none; border-bottom:1px solid var(--border); padding:12px 16px;
+    background:var(--panel);
+  }
+  #refsPanelHeader{display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;}
+  #refsPanelHeader strong{font-size:13px; margin-right:4px;}
+  #refChipsList{display:flex; flex-wrap:wrap; gap:10px;}
+  #refModalCard{width:min(620px,94vw);}
+  #rfLabelInput{width:300px;}
+  #rfPageInput{width:70px;}
+  #rfKindSelect{max-width:320px;}
   .dtRow{display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;}
   .dtRow .dtLabel{font-size:12px; color:var(--muted);}
   #dtNameInput{width:260px;}
@@ -309,6 +320,14 @@
   <div id="tableChipsList"></div>
 </div>
 
+<div id="refsPanel">
+  <div id="refsPanelHeader">
+    <strong>Pàgines marcades</strong>
+    <span style="font-size:12px; color:var(--muted);">el que no és text sinó imatge: on és cada cosa, on comença cada secció</span>
+  </div>
+  <div id="refChipsList"></div>
+</div>
+
 <div id="status"></div>
 
 <div id="dropzone">
@@ -332,6 +351,7 @@
     <button id="modalNext">Següent ▶</button>
     <button id="modalToggle">Selecciona aquesta pàgina</button>
     <button id="modalPortadaBtn">Marca com a portada</button>
+    <button id="modalRefBtn" title="Apunta aquesta pàgina al catàleg amb un nom (una pàgina ja marcada obre la seva fitxa)">📌 Marca la pàgina</button>
     <button id="modalClose">Tanca ✕</button>
     <span id="modalPickHint">🎯 Arrossega el ratolí sobre el text que vols (Esc per cancel·lar)</span>
   </div>
@@ -387,6 +407,31 @@
         <button id="menuImportCancel">Cancel·la</button>
         <button class="primary" id="menuImportConfirm">Importa</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="refModalOverlay">
+  <div class="reviewCard" id="refModalCard">
+    <div class="reviewTop">
+      <strong>Pàgina marcada</strong>
+      <button id="rfCloseBtn" style="margin-left:auto;">Tanca ✕</button>
+    </div>
+    <div class="dtRow">
+      <span class="dtLabel">Nom</span>
+      <input type="text" id="rfLabelInput" placeholder="ex: Punts de consignació">
+      <button id="rfPickBtn" title="Tria el nom arrossegant un requadre sobre la pàgina">🎯 Nom</button>
+    </div>
+    <div class="dtRow">
+      <span class="dtLabel">Mena</span>
+      <select id="rfKindSelect"></select>
+      <span class="dtLabel" style="margin-left:10px;">Pàgina</span>
+      <input type="text" id="rfPageInput">
+      <button id="rfOpenPageBtn">Obre-la</button>
+    </div>
+    <div class="reviewActions">
+      <div class="left"><button id="rfDeleteBtn">Treu la marca</button></div>
+      <div class="right"><button class="primary" id="rfDoneBtn">Fet</button></div>
     </div>
   </div>
 </div>
@@ -606,7 +651,19 @@ var els = {
   dtDeleteBtn: document.getElementById('dtDeleteBtn'),
   dtClearRowsBtn: document.getElementById('dtClearRowsBtn'),
   dtAddRowBtn: document.getElementById('dtAddRowBtn'),
-  dtDoneBtn: document.getElementById('dtDoneBtn')
+  dtDoneBtn: document.getElementById('dtDoneBtn'),
+  modalRefBtn: document.getElementById('modalRefBtn'),
+  refsPanel: document.getElementById('refsPanel'),
+  refChipsList: document.getElementById('refChipsList'),
+  refModalOverlay: document.getElementById('refModalOverlay'),
+  rfCloseBtn: document.getElementById('rfCloseBtn'),
+  rfLabelInput: document.getElementById('rfLabelInput'),
+  rfPickBtn: document.getElementById('rfPickBtn'),
+  rfKindSelect: document.getElementById('rfKindSelect'),
+  rfPageInput: document.getElementById('rfPageInput'),
+  rfOpenPageBtn: document.getElementById('rfOpenPageBtn'),
+  rfDeleteBtn: document.getElementById('rfDeleteBtn'),
+  rfDoneBtn: document.getElementById('rfDoneBtn')
 };
 
 var state = {
@@ -631,7 +688,9 @@ var state = {
   pickingMode: 'text', // 'text' (name / number) | 'rows' (mark parts-list rows)
   pickItems: [],       // per-item text geometry (canvas space) for the current modal page
   tables: [],          // manual-wide data tables (spares list, electrical BOM, plans)
-  editingTable: null   // id of the data table open in its detail view
+  editingTable: null,  // id of the data table open in its detail view
+  refs: [],            // marked pages: what is only an image, pointed at
+  editingRef: null     // id of the marked page open in its editor
 };
 
 function showToast(msg, ms){
@@ -669,6 +728,7 @@ function resetApp(){
   state.pendingMenuImport = null;
   state.machine = emptyMachine(); state.portadaPage = null; state.colLayout = null;
   state.tables = []; state.editingTable = null;
+  state.refs = []; state.editingRef = null;
   if(muDoc != null && muMod){ try{ muMod.freeDocument(muDoc); }catch(e){} }
   muDoc = null; muDocFor = null; // the wasm module itself is kept for the session
   els.grid.innerHTML = '';
@@ -679,6 +739,8 @@ function resetApp(){
   els.conjuntChipsList.innerHTML = '';
   els.tablesPanel.style.display = 'none';
   els.tableChipsList.innerHTML = '';
+  els.refsPanel.style.display = 'none';
+  els.refChipsList.innerHTML = '';
   els.dropzone.style.display = 'block';
   els.fileInput.value = '';
   setStatus('');
@@ -719,9 +781,11 @@ function loadPdf(bytesForPdfjs){
     state.colLayout = cat.colLayout;
     state.conjunts = cat.conjunts;
     state.tables = cat.tables;
+    state.refs = cat.refs;
     renderMachinePanel();
     renderConjuntsPanel();
     renderTablesPanel();
+    renderRefsPanel();
   }).catch(function(err){
     console.error(err);
     setStatus('');
@@ -909,11 +973,25 @@ function openModal(page){
   els.modalOverlay.classList.add('open');
   renderModalPage(page);
 }
+// One canvas, one render. Asking for a second page before the first has
+// finished drawing -- stepping through pages, or jumping to one from a marked
+// page's card -- makes pdf.js refuse the pair and throw where nobody was
+// listening. Cancelling the one in flight is the way out it offers, and the
+// rejection that follows IS the cancellation, not a failure, so it's let past
+// in silence.
+var modalRenderTask = null;
+function cancelModalRender(){
+  if(!modalRenderTask) return;
+  try{ modalRenderTask.cancel(); }catch(e){}
+  modalRenderTask = null;
+}
 function renderModalPage(page){
   els.modalPageLabel.textContent = 'Pàgina ' + page + ' de ' + state.numPages;
   updateModalToggleLabel();
   updateModalPortadaLabel();
-  state.pdfDoc.getPage(page).then(function(pdfPage){
+  updateModalRefLabel();
+  return state.pdfDoc.getPage(page).then(function(pdfPage){
+    cancelModalRender();
     var vp0 = pdfPage.getViewport({scale:1});
     var maxWidth = Math.min(window.innerWidth*0.9, 1100);
     var scale = maxWidth / vp0.width;
@@ -921,11 +999,17 @@ function renderModalPage(page){
     els.modalCanvas.width = viewport.width;
     els.modalCanvas.height = viewport.height;
     var ctx = els.modalCanvas.getContext('2d');
-    var renderP = pdfPage.render({canvasContext: ctx, viewport: viewport}).promise;
+    var task = pdfPage.render({canvasContext: ctx, viewport: viewport});
+    modalRenderTask = task;
     if(state.pickingTarget){
       pdfPage.getTextContent().then(function(tc){ state.pickItems = buildPickItems(repairCadGlyphs(tc), viewport); });
     }
-    return renderP;
+    return task.promise.then(function(){
+      if(modalRenderTask === task) modalRenderTask = null;
+    });
+  }).catch(function(err){
+    if(err && err.name === 'RenderingCancelledException') return;
+    console.warn('Error rendering page', page, err);
   });
 }
 // Per-item text geometry in CANVAS space for name-picking. Each pdf.js text
@@ -1140,6 +1224,7 @@ document.addEventListener('keydown', function(e){
   if(e.key === ' '){ e.preventDefault(); els.modalToggle.click(); }
 });
 function closeModal(){
+  cancelModalRender();
   els.modalOverlay.classList.remove('open');
   if(state.pickingTarget) endPicking();
 }
@@ -1195,14 +1280,15 @@ function emptyMachine(){ return {serial:'', model:'', client:''}; }
 // held just the bare conjunts array — migrate those on read.
 function loadCatalogForFile(fileName){
   var raw = loadAllCatalogs()[fileName];
-  if(!raw) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:[], tables:[] };
-  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:normalizeConjunts(raw), tables:[] };
+  if(!raw) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:[], tables:[], refs:[] };
+  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:normalizeConjunts(raw), tables:[], refs:[] };
   return {
     machine: Object.assign(emptyMachine(), raw.machine || {}),
     portadaPage: raw.portadaPage || null,
     colLayout: raw.colLayout || null,
     conjunts: normalizeConjunts(raw.conjunts || []),
-    tables: normalizeTables(raw.tables || [])
+    tables: normalizeTables(raw.tables || []),
+    refs: normalizeRefs(raw.refs || [])
   };
 }
 // Migrates stored conjunts to the current hierarchy:
@@ -1247,7 +1333,7 @@ function grupRowCount(g){
 }
 function persistConjunts(){
   var all = loadAllCatalogs();
-  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables };
+  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables, refs: state.refs };
   localStorage.setItem(CATALOG_LS_KEY, JSON.stringify(all));
 }
 function uid(){
@@ -2739,6 +2825,7 @@ document.addEventListener('keydown', function(e){
   if(els.nameModalOverlay.classList.contains('open')){ cancelNameModal(); return; }
   if(els.menuImportOverlay.classList.contains('open')){ cancelMenuImport(); return; }
   if(els.grupModalOverlay.classList.contains('open')){ els.reviewCancelBtn.click(); return; }
+  if(els.refModalOverlay.classList.contains('open')){ closeRefDetail(); return; }
   if(els.tableDetailOverlay.classList.contains('open')){ closeTableDetail(); return; }
   if(els.conjuntDetailOverlay.classList.contains('open')){ closeConjuntDetail(); return; }
 });
@@ -3065,6 +3152,180 @@ els.dtDoneBtn.addEventListener('click', closeTableDetail);
 els.tableDetailCloseBtn.addEventListener('click', closeTableDetail);
 els.tableDetailOverlay.addEventListener('click', function(e){ if(e.target === els.tableDetailOverlay) closeTableDetail(); });
 
+// ===== Marked pages ========================================================
+// Some of what a manual knows isn't text at all. Where the consignation points
+// are, where the air comes in, which panel is which, where a chapter starts:
+// all of it is a drawing or a photograph, and there is nothing on the page to
+// extract. What there is, is the page itself -- and a page number is enough,
+// because the field app's viewer already opens any page of this same manual.
+// So a marked page is a pointer with a name on it: the cheapest thing in the
+// whole extraction, and one of the most useful at the machine.
+var REF_KINDS = [
+  {v:'location',  label:'Localització (on és, a la màquina)'},
+  {v:'section',   label:'Inici de secció del manual'},
+  {v:'procedure', label:'Procediment (instal·lació, posada en marxa…)'},
+  {v:'other',     label:'Altres'}
+];
+function refKind(v){
+  for(var i=0;i<REF_KINDS.length;i++) if(REF_KINDS[i].v === v) return REF_KINDS[i];
+  return REF_KINDS[0];
+}
+function normalizeRefs(list){
+  return (list||[]).map(function(r){
+    r = r || {};
+    var p = parseInt(r.page, 10);
+    return { id: uid(), kind: refKind(r.kind).v, page: isNaN(p) ? null : p, label: r.label || '' };
+  }).filter(function(r){ return r.page; }).sort(byRefPage);
+}
+function byRefPage(a, b){ return (a.page||0) - (b.page||0); }
+function findRef(id){ return state.refs.find(function(r){ return r.id === id; }); }
+function refOnPage(page){ return state.refs.find(function(r){ return r.page === page; }); }
+function editingRef(){ return state.editingRef ? findRef(state.editingRef) : null; }
+function refTitle(r){ return r.label || ('Pàgina ' + r.page); }
+// A first name for a page, so a mark is never just a number. This manual heads
+// its body pages with a numbered heading ("5.9 RECOMMENDED SPARE PARTS LIST")
+// under a running header that repeats on all 136 of them; the deepest heading
+// on the page is the one that describes it, so the last one found wins. When
+// there is none -- a full-page drawing often has none -- the name is left
+// empty rather than guessed at, and the panel shows the page number until you
+// put a name on it.
+function mostlyUpper(s){
+  var up = 0, low = 0;
+  (s||'').split('').forEach(function(ch){
+    if(ch >= 'A' && ch <= 'Z') up++;
+    else if(ch >= 'a' && ch <= 'z') low++;
+  });
+  return (up + low) >= 4 && up / (up + low) >= 0.6;
+}
+function suggestRefLabel(page){
+  return getPageLines(page).then(function(lines){
+    var found = '';
+    lines.forEach(function(l){
+      l = (l||'').trim();
+      if(l.length < 5 || l.length > 80) return;
+      if(/^page\s+\d+\s+of\s+\d+$/i.test(l)) return;
+      if(/^(machine|serial|project|m[aà]quina)\b.{0,12}:/i.test(l)) return;
+      if(/MANUAL\s+DE\s+INSTRU|OPERATING AND MAINTEN/i.test(l)) return;
+      var m = l.match(/^(\d+(?:\.\d+)*)\s*\.?\s+(\S.{2,})$/);
+      // A numbered line isn't necessarily a heading: a procedure's steps
+      // ("2 Insert fixing bolts") and a plan's rows ("4 minutes Stopped MODE
+      // 2") start the same way. What tells them apart on these pages is the
+      // case -- headings are set in capitals and the running text isn't.
+      if(m && mostlyUpper(m[2])) found = m[1] + ' ' + m[2].replace(/\s*\.+\s*$/, '').trim();
+    });
+    return found;
+  }).catch(function(){ return ''; });
+}
+function renderRefsPanel(){
+  els.refsPanel.style.display = state.refs.length ? 'block' : 'none';
+  els.refChipsList.innerHTML = '';
+  state.refs.forEach(function(r){
+    var chip = document.createElement('div');
+    chip.className = 'conjuntChip';
+    var nameEl = document.createElement('div');
+    nameEl.className = 'gName';
+    nameEl.textContent = refTitle(r);
+    var metaEl = document.createElement('div');
+    metaEl.className = 'gMeta';
+    metaEl.textContent = refKind(r.kind).label.replace(/\s*\(.*\)$/, '') + ' · pàg. ' + r.page;
+    var delBtn = document.createElement('button');
+    delBtn.className = 'gDel'; delBtn.textContent = '✕';
+    delBtn.addEventListener('click', function(e){ e.stopPropagation(); deleteRef(r.id); });
+    chip.appendChild(nameEl); chip.appendChild(metaEl); chip.appendChild(delBtn);
+    chip.addEventListener('click', function(){ openRefDetail(r.id); });
+    els.refChipsList.appendChild(chip);
+  });
+}
+function deleteRef(id){
+  state.refs = state.refs.filter(function(r){ return r.id !== id; });
+  if(state.editingRef === id) closeRefDetail();
+  persistConjunts();
+  renderRefsPanel();
+  if(els.modalOverlay.classList.contains('open')) updateModalRefLabel();
+}
+function openRefDetail(id){
+  var r = findRef(id); if(!r) return;
+  state.editingRef = id;
+  els.rfKindSelect.innerHTML = REF_KINDS.map(function(k){
+    return '<option value="'+k.v+'"'+(k.v===r.kind?' selected':'')+'>'+escHtml(k.label)+'</option>';
+  }).join('');
+  renderRefDetail();
+  els.refModalOverlay.classList.add('open');
+}
+function renderRefDetail(){
+  var r = editingRef(); if(!r) return;
+  els.rfLabelInput.value = r.label || '';
+  els.rfKindSelect.value = r.kind;
+  els.rfPageInput.value = r.page || '';
+}
+function closeRefDetail(){
+  els.refModalOverlay.classList.remove('open');
+  state.editingRef = null;
+  renderRefsPanel();
+}
+// The viewer's own button: it is where you are when you decide a page is worth
+// pointing at. Marking from there takes one click, and a page already marked
+// hands you its card instead of a second mark (one page, one pointer).
+function updateModalRefLabel(){
+  var ex = refOnPage(state.modalPage);
+  els.modalRefBtn.textContent = ex ? '✓ Pàgina marcada' : '📌 Marca la pàgina';
+}
+els.modalRefBtn.addEventListener('click', function(){
+  var page = state.modalPage, ex = refOnPage(page);
+  if(ex){ closeModal(); openRefDetail(ex.id); return; }
+  var ref = {id:uid(), kind:'location', page:page, label:''};
+  state.refs.push(ref);
+  state.refs.sort(byRefPage);
+  persistConjunts();
+  updateModalRefLabel();
+  renderRefsPanel();
+  showToast('Pàgina ' + page + ' marcada.');
+  // The name arrives a moment later, and only if the page offers one -- never
+  // over a name already typed in the meantime.
+  suggestRefLabel(page).then(function(name){
+    if(!name || ref.label) return;
+    ref.label = name;
+    persistConjunts();
+    renderRefsPanel();
+    if(state.editingRef === ref.id) renderRefDetail();
+  });
+});
+els.rfLabelInput.addEventListener('input', function(){ var r = editingRef(); if(r) r.label = els.rfLabelInput.value; });
+els.rfLabelInput.addEventListener('change', function(){ persistConjunts(); renderRefsPanel(); });
+els.rfKindSelect.addEventListener('change', function(){
+  var r = editingRef(); if(!r) return;
+  r.kind = els.rfKindSelect.value;
+  persistConjunts(); renderRefsPanel();
+});
+els.rfPageInput.addEventListener('change', function(){
+  var r = editingRef(); if(!r) return;
+  var n = parseInt(els.rfPageInput.value, 10);
+  if(isNaN(n) || n < 1 || n > state.numPages){ renderRefDetail(); showToast('Aquesta pàgina no és al manual.'); return; }
+  var other = state.refs.find(function(x){ return x.page === n && x.id !== r.id; });
+  if(other){ renderRefDetail(); showToast('La pàgina ' + n + ' ja està marcada com a «' + refTitle(other) + '».', 3500); return; }
+  r.page = n;
+  state.refs.sort(byRefPage);
+  persistConjunts(); renderRefsPanel();
+});
+els.rfPickBtn.addEventListener('click', function(){
+  var r = editingRef(); if(!r) return;
+  startPicking(r.page, function(text){
+    r.label = stripTitleLabel(text);
+    persistConjunts();
+    renderRefDetail();
+    renderRefsPanel();
+  });
+});
+els.rfOpenPageBtn.addEventListener('click', function(){
+  var r = editingRef(); if(r) openModal(r.page);
+});
+els.rfDeleteBtn.addEventListener('click', function(){
+  var r = editingRef(); if(r) deleteRef(r.id);
+});
+els.rfDoneBtn.addEventListener('click', closeRefDetail);
+els.rfCloseBtn.addEventListener('click', closeRefDetail);
+els.refModalOverlay.addEventListener('click', function(e){ if(e.target === els.refModalOverlay) closeRefDetail(); });
+
 // -- Export JSON (one file per conjunt) --
 function sanitizeFn(s){ return (s||'').toString().trim().replace(/[\/\\:*?"<>|]/g,'_').replace(/\s+/g,'_'); }
 function serializeConjunt(c){
@@ -3177,11 +3438,15 @@ function catalogPayload(){
     portadaPage: pages ? null : state.portadaPage,
     conjunts: scs
   };
-  // Data tables sit on pages no conjunt covers -- the spares list, the
-  // electrical BOM -- so a renumbered PDF doesn't contain them and there is no
-  // numbering to move them onto. They only travel with the whole manual, which
-  // is why the export button says so before writing a renumbered file.
+  // Data tables and marked pages sit on pages no conjunt covers -- the spares
+  // list, the electrical BOM, the consignation diagram -- so a renumbered PDF
+  // doesn't contain them and there is no numbering to move them onto. They
+  // only travel with the whole manual, which is why the export button says so
+  // before writing a renumbered file.
   if(!pages && state.tables.length) out.tables = state.tables.map(serializeTable);
+  if(!pages && state.refs.length){
+    out.refs = state.refs.map(function(r){ return {kind:r.kind, page:r.page, label:refTitle(r)}; });
+  }
   return out;
 }
 // Named after whatever PDF it pairs with: the source manual (…/Foo.pdf →
@@ -3347,17 +3612,23 @@ els.exportConjuntBtn.addEventListener('click', function(){
   showToast('Exportat: ' + conjuntFileName(c, idx));
 });
 els.exportCombinedBtn.addEventListener('click', function(){
-  var nC = state.conjunts.length, nT = state.tables.length;
-  if(!nC && !nT){ showToast('No hi ha cap conjunt ni cap taula.'); return; }
-  if(remapOn() && nT && !confirm('Les ' + nT + (nT===1?' taula de dades viu':' taules de dades viuen') +
-      ' a pàgines que no són de cap conjunt, i per tant no són al PDF renumerat: quedarà fora del JSON.\n\n' +
-      'Per pujar-les al field app, desmarca la renumeració i fes servir el manual sencer com a PDF.\n\nExporto igualment?')) return;
+  var nC = state.conjunts.length, nT = state.tables.length, nR = state.refs.length;
+  if(!nC && !nT && !nR){ showToast('No hi ha res per exportar.'); return; }
+  if(remapOn() && (nT || nR)){
+    var what = [];
+    if(nT) what.push(nT + (nT===1?' taula de dades':' taules de dades'));
+    if(nR) what.push(nR + (nR===1?' pàgina marcada':' pàgines marcades'));
+    if(!confirm(what.join(' i ') + ' són a pàgines que no són de cap conjunt, i per tant no són al ' +
+        'PDF renumerat: quedaran fora del JSON.\n\nPer pujar-les al field app, desmarca la renumeració i ' +
+        'fes servir el manual sencer com a PDF.\n\nExporto igualment?')) return;
+  }
   var fn = catalogFileName();
   downloadJson(catalogPayload(), fn);
   var parts = [];
   if(nC) parts.push(nC + (nC===1?' conjunt':' conjunts'));
   if(nT && !remapOn()) parts.push(nT + (nT===1?' taula':' taules'));
-  showToast('Exportat: ' + fn + ' (' + parts.join(' i ') + ')');
+  if(nR && !remapOn()) parts.push(nR + (nR===1?' pàgina':' pàgines'));
+  showToast('Exportat: ' + fn + ' (' + parts.join(', ') + ')');
 });
 els.exportCatalogBtn.addEventListener('click', function(){
   if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
@@ -3419,8 +3690,9 @@ function importCatalogJson(data){
   var list = data && data.conjunt ? [data.conjunt]
     : (data && Array.isArray(data.conjunts) ? data.conjunts
     : (Array.isArray(data) ? data : null));
-  // A JSON may carry only data tables (no conjunt at all) and still be valid.
-  if(!list && data && Array.isArray(data.tables)) list = [];
+  // A JSON may carry only data tables or marked pages (no conjunt at all) and
+  // still be valid.
+  if(!list && data && (Array.isArray(data.tables) || Array.isArray(data.refs))) list = [];
   if(!list){ showToast('El JSON no sembla un catàleg vàlid.'); return; }
   normalizeConjunts(list); // migrate legacy flat-rows shape; ensure subgrups + num
   list.forEach(function(c){
@@ -3432,19 +3704,29 @@ function importCatalogJson(data){
     ['serial','model','client'].forEach(function(k){ if(!state.machine[k] && data.machine[k]) state.machine[k] = data.machine[k]; });
   }
   if(!state.portadaPage && data && data.portadaPage) state.portadaPage = data.portadaPage;
-  var nT = 0;
+  var nT = 0, nR = 0;
   if(data && Array.isArray(data.tables) && data.tables.length){
     normalizeTables(data.tables).forEach(function(t){ state.tables.push(t); });
     nT = data.tables.length;
+  }
+  if(data && Array.isArray(data.refs) && data.refs.length){
+    // One page, one pointer: a page already marked here keeps the name it has.
+    normalizeRefs(data.refs).forEach(function(r){
+      if(refOnPage(r.page)) return;
+      state.refs.push(r); nR++;
+    });
+    state.refs.sort(byRefPage);
   }
   persistConjunts();
   renderMachinePanel();
   renderConjuntsPanel();
   renderTablesPanel();
+  renderRefsPanel();
   var parts = [];
   if(list.length) parts.push(list.length + (list.length===1 ? ' conjunt' : ' conjunts'));
   if(nT) parts.push(nT + (nT===1 ? ' taula' : ' taules'));
-  showToast(parts.length ? (parts.join(' i ') + ' importats.') : 'El JSON no portava res per importar.');
+  if(nR) parts.push(nR + (nR===1 ? ' pàgina marcada' : ' pàgines marcades'));
+  showToast(parts.length ? (parts.join(', ') + ' importats.') : 'El JSON no portava res per importar.');
 }
 els.importJsonBtn.addEventListener('click', function(){ els.importJsonInput.click(); });
 els.importJsonInput.addEventListener('change', function(e){
