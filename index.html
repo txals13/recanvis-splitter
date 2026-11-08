@@ -158,6 +158,17 @@
   #refChipsList{display:flex; flex-wrap:wrap; gap:10px;}
   #refModalCard{width:min(620px,94vw);}
   #machineCardCard{width:min(760px,94vw);}
+  #sheetsPanel{
+    display:none; border-bottom:1px solid var(--border); padding:12px 16px;
+    background:var(--panel);
+  }
+  #sheetsPanelHeader{display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;}
+  #sheetsPanelHeader strong{font-size:13px; margin-right:4px;}
+  #sheetsSummary{font-size:12px; color:var(--muted);}
+  #sheetsList{max-height:120px; overflow:auto;}
+  .sheetTag{display:inline-block; font-family:monospace; font-size:11px; padding:2px 6px; margin:2px;
+    border:1px solid var(--border); border-radius:4px; color:var(--muted); cursor:pointer; background:var(--panel2);}
+  .sheetTag:hover{border-color:var(--accent); color:var(--text);}
   .mcRow{display:grid; grid-template-columns:190px 1fr auto; gap:8px; align-items:center; margin-bottom:8px;}
   .mcRow label{font-size:12px; color:var(--muted);}
   .mcRow input{width:100%;}
@@ -287,6 +298,7 @@
   <button id="clearSelBtn">Neteja selecció</button>
   <button id="createConjuntBtn">Crea un conjunt</button>
   <button id="createTableBtn">Crea una taula de dades</button>
+  <button id="scanSheetsBtn" title="Llegeix el número de full del caixetí de cada pàgina seleccionada i en fa el mapa full → pàgina">Llegeix els núms. de full</button>
   <button id="newFileBtn">Obre un altre PDF</button>
 </header>
 
@@ -332,6 +344,15 @@
     <span style="font-size:12px; color:var(--muted);">el que no és text sinó imatge: on és cada cosa, on comença cada secció</span>
   </div>
   <div id="refChipsList"></div>
+</div>
+
+<div id="sheetsPanel">
+  <div id="sheetsPanelHeader">
+    <strong>Fulls d'esquema</strong>
+    <span id="sheetsSummary"></span>
+    <button id="sheetsClearBtn" style="margin-left:auto;">Buida el mapa</button>
+  </div>
+  <div id="sheetsList"></div>
 </div>
 
 <div id="status"></div>
@@ -696,7 +717,12 @@ var els = {
   mcDoneBtn: document.getElementById('mcDoneBtn'),
   mcPageInput: document.getElementById('mcPageInput'),
   mcOpenPageBtn: document.getElementById('mcOpenPageBtn'),
-  mcFields: document.getElementById('mcFields')
+  mcFields: document.getElementById('mcFields'),
+  scanSheetsBtn: document.getElementById('scanSheetsBtn'),
+  sheetsPanel: document.getElementById('sheetsPanel'),
+  sheetsSummary: document.getElementById('sheetsSummary'),
+  sheetsList: document.getElementById('sheetsList'),
+  sheetsClearBtn: document.getElementById('sheetsClearBtn')
 };
 
 var state = {
@@ -724,7 +750,8 @@ var state = {
   tables: [],          // manual-wide data tables (spares list, electrical BOM, plans)
   editingTable: null,  // id of the data table open in its detail view
   refs: [],            // marked pages: what is only an image, pointed at
-  editingRef: null     // id of the marked page open in its editor
+  editingRef: null,    // id of the marked page open in its editor
+  sheets: []           // schematic sheet number -> page, read off the title blocks
 };
 
 function showToast(msg, ms){
@@ -763,6 +790,7 @@ function resetApp(){
   state.machine = emptyMachine(); state.portadaPage = null; state.specPage = null; state.colLayout = null;
   state.tables = []; state.editingTable = null;
   state.refs = []; state.editingRef = null;
+  state.sheets = [];
   if(muDoc != null && muMod){ try{ muMod.freeDocument(muDoc); }catch(e){} }
   muDoc = null; muDocFor = null; // the wasm module itself is kept for the session
   els.grid.innerHTML = '';
@@ -775,6 +803,8 @@ function resetApp(){
   els.tableChipsList.innerHTML = '';
   els.refsPanel.style.display = 'none';
   els.refChipsList.innerHTML = '';
+  els.sheetsPanel.style.display = 'none';
+  els.sheetsList.innerHTML = '';
   els.dropzone.style.display = 'block';
   els.fileInput.value = '';
   setStatus('');
@@ -817,10 +847,12 @@ function loadPdf(bytesForPdfjs){
     state.conjunts = cat.conjunts;
     state.tables = cat.tables;
     state.refs = cat.refs;
+    state.sheets = cat.sheets;
     renderMachinePanel();
     renderConjuntsPanel();
     renderTablesPanel();
     renderRefsPanel();
+    renderSheetsPanel();
   }).catch(function(err){
     console.error(err);
     setStatus('');
@@ -946,6 +978,7 @@ function updateSelCount(){
   els.selCount.textContent = n + (n===1 ? ' pàgina seleccionada' : ' pàgines seleccionades');
   els.exportBtn.disabled = n === 0;
   els.createConjuntBtn.disabled = n === 0;
+  els.scanSheetsBtn.disabled = n === 0;
 }
 
 // ---- Toolbar actions ----
@@ -1343,8 +1376,8 @@ function machineFilledCount(){
 // held just the bare conjunts array — migrate those on read.
 function loadCatalogForFile(fileName){
   var raw = loadAllCatalogs()[fileName];
-  if(!raw) return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:[], tables:[], refs:[] };
-  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:normalizeConjunts(raw), tables:[], refs:[] };
+  if(!raw) return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:[], tables:[], refs:[], sheets:[] };
+  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:normalizeConjunts(raw), tables:[], refs:[], sheets:[] };
   return {
     machine: Object.assign(emptyMachine(), raw.machine || {}),
     portadaPage: raw.portadaPage || null,
@@ -1352,7 +1385,8 @@ function loadCatalogForFile(fileName){
     colLayout: raw.colLayout || null,
     conjunts: normalizeConjunts(raw.conjunts || []),
     tables: normalizeTables(raw.tables || []),
-    refs: normalizeRefs(raw.refs || [])
+    refs: normalizeRefs(raw.refs || []),
+    sheets: normalizeSheets(raw.sheets || [])
   };
 }
 // Migrates stored conjunts to the current hierarchy:
@@ -1397,7 +1431,7 @@ function grupRowCount(g){
 }
 function persistConjunts(){
   var all = loadAllCatalogs();
-  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, specPage: state.specPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables, refs: state.refs };
+  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, specPage: state.specPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables, refs: state.refs, sheets: state.sheets };
   localStorage.setItem(CATALOG_LS_KEY, JSON.stringify(all));
 }
 function uid(){
@@ -3278,6 +3312,118 @@ els.mcDoneBtn.addEventListener('click', closeMachineCard);
 els.mcCloseBtn.addEventListener('click', closeMachineCard);
 els.machineCardOverlay.addEventListener('click', function(e){ if(e.target === els.machineCardOverlay) closeMachineCard(); });
 
+// ===== Sheet map ===========================================================
+// The electrical material list says on which SHEET each device is drawn --
+// "90", "211", "741A" -- and a sheet number is not a page number: the schematic
+// annex has its own numbering, printed in the title block of every sheet, and
+// where it lands in the PDF depends on what the manual put before it. Reading
+// that title block once per page gives the map from one to the other, and
+// with it a device in the list is two taps from its circuit. Nothing to mark:
+// the number is always in the same slot, so a range of pages is scanned and
+// the map builds itself.
+function sheetTokenOf(str){
+  var t = (str||'').trim();
+  return /^\d{1,5}[A-Z]?$/.test(t) ? t : null;
+}
+// The title block prints "Page" and, a little further along the reading
+// direction and exactly in line with it, the sheet's own number; the number
+// of the NEXT sheet sits beside it, out of line, which is what keeps it out.
+// Everything is measured in the sheet's own axes, so a landscape annex (every
+// item at 90°) and a portrait page read the same way.
+function readSheetNumber(page){
+  return getPageItemsFull(page).then(function(items){
+    var best = null;
+    items.forEach(function(l){
+      if(!/^(Page|P[aá]g\.?|Pàgina|Hoja|Full|Blatt)$/i.test((l.str||'').trim())) return;
+      var lu = uvOf(l);
+      items.forEach(function(i){
+        if(i === l || (i.rot||0) !== (l.rot||0)) return;
+        var t = sheetTokenOf(i.str); if(!t) return;
+        var u = uvOf(i), du = u.u - lu.u, dv = Math.abs(u.v - lu.v);
+        if(dv > 3 || du <= 0 || du > 130) return;
+        if(!best || du < best.du) best = {sheet:t, du:du};
+      });
+    });
+    return best ? best.sheet : null;
+  }).catch(function(){ return null; });
+}
+function normalizeSheets(list){
+  var seen = {};
+  return (list||[]).map(function(x){
+    x = x || {};
+    var p = parseInt(x.page, 10), t = sheetTokenOf(x.sheet);
+    return (t && !isNaN(p)) ? {sheet:t, page:p} : null;
+  }).filter(function(x){ if(!x || seen[x.page]) return false; seen[x.page] = 1; return true; })
+    .sort(function(a,b){ return a.page - b.page; });
+}
+// How much of what the electrical lists cite is actually on the map.
+function sheetCoverage(){
+  var cited = {}, have = {};
+  state.sheets.forEach(function(x){ have[x.sheet] = 1; });
+  state.tables.forEach(function(t){ (t.rows||[]).forEach(function(r){ if(r.full) cited[String(r.full).trim()] = 1; }); });
+  var keys = Object.keys(cited);
+  return {cited: keys.length, ok: keys.filter(function(k){ return have[k]; }).length,
+          missing: keys.filter(function(k){ return !have[k]; })};
+}
+function renderSheetsPanel(){
+  var n = state.sheets.length;
+  els.sheetsPanel.style.display = n ? 'block' : 'none';
+  els.sheetsList.innerHTML = '';
+  if(!n) return;
+  var pages = state.sheets.map(function(x){ return x.page; });
+  var txt = n + ' fulls · pàgines ' + pagesToRangeStr(pages);
+  var cov = sheetCoverage();
+  if(cov.cited) txt += ' · dels ' + cov.cited + ' fulls citats a les taules, ' + cov.ok + ' tenen pàgina' +
+    (cov.missing.length ? ' (falten: ' + cov.missing.slice(0,8).join(', ') + (cov.missing.length>8?'…':'') + ')' : '');
+  els.sheetsSummary.textContent = txt;
+  state.sheets.forEach(function(x){
+    var tag = document.createElement('span'); tag.className = 'sheetTag';
+    tag.textContent = x.sheet + '→' + x.page;
+    tag.title = 'Full ' + x.sheet + ' és la pàgina ' + x.page + ' (clica per veure-la)';
+    tag.addEventListener('click', function(){ openModal(x.page); });
+    els.sheetsList.appendChild(tag);
+  });
+}
+function scanSheets(pages){
+  var btn = els.scanSheetsBtn, lbl = btn.textContent;
+  btn.disabled = true;
+  var byPage = {}, bySheet = {}, found = 0, missing = [], dupes = [];
+  state.sheets.forEach(function(x){ byPage[x.page] = x; bySheet[x.sheet] = x; });
+  return pages.reduce(function(chain, p, idx){
+    return chain.then(function(){
+      btn.textContent = 'Llegint ' + (idx+1) + ' / ' + pages.length + '…';
+      return readSheetNumber(p).then(function(sheet){
+        if(!sheet){ missing.push(p); return; }
+        var other = bySheet[sheet];
+        if(other && other.page !== p){ dupes.push(sheet + ' (p. ' + other.page + ' i ' + p + ')'); return; }
+        if(byPage[p]){ delete bySheet[byPage[p].sheet]; byPage[p].sheet = sheet; }
+        else { byPage[p] = {sheet:sheet, page:p}; state.sheets.push(byPage[p]); }
+        bySheet[sheet] = byPage[p]; found++;
+      });
+    });
+  }, Promise.resolve()).then(function(){
+    state.sheets.sort(function(a,b){ return a.page - b.page; });
+    persistConjunts();
+    renderSheetsPanel();
+    btn.disabled = false; btn.textContent = lbl;
+    var msg = found + ' fulls llegits de ' + pages.length + ' pàgines.';
+    if(missing.length) msg += ' Sense número: ' + pagesToRangeStr(missing) + '.';
+    if(dupes.length) msg += ' Repetits: ' + dupes.slice(0,4).join('; ') + (dupes.length>4?'…':'') + '.';
+    showToast(msg, 6000);
+  });
+}
+els.scanSheetsBtn.addEventListener('click', function(){
+  var pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
+  if(!pages.length){ showToast('Selecciona a la graella les pàgines de l\'annex d\'esquemes.'); return; }
+  scanSheets(pages);
+});
+els.sheetsClearBtn.addEventListener('click', function(){
+  if(!state.sheets.length) return;
+  if(!confirm('Buidar el mapa de ' + state.sheets.length + ' fulls?')) return;
+  state.sheets = [];
+  persistConjunts(); renderSheetsPanel();
+});
+
 // ===== Marked pages ========================================================
 // Some of what a manual knows isn't text at all. Where the consignation points
 // are, where the air comes in, which panel is which, where a chapter starts:
@@ -3573,6 +3719,9 @@ function catalogPayload(){
   if(!pages && state.refs.length){
     out.refs = state.refs.map(function(r){ return {kind:r.kind, page:r.page, label:refTitle(r)}; });
   }
+  if(!pages && state.sheets.length){
+    out.sheets = state.sheets.map(function(x){ return {sheet:x.sheet, page:x.page}; });
+  }
   return out;
 }
 // Named after whatever PDF it pairs with: the source manual (…/Foo.pdf →
@@ -3738,12 +3887,13 @@ els.exportConjuntBtn.addEventListener('click', function(){
   showToast('Exportat: ' + conjuntFileName(c, idx));
 });
 els.exportCombinedBtn.addEventListener('click', function(){
-  var nC = state.conjunts.length, nT = state.tables.length, nR = state.refs.length;
-  if(!nC && !nT && !nR){ showToast('No hi ha res per exportar.'); return; }
-  if(remapOn() && (nT || nR)){
+  var nC = state.conjunts.length, nT = state.tables.length, nR = state.refs.length, nS = state.sheets.length;
+  if(!nC && !nT && !nR && !nS){ showToast('No hi ha res per exportar.'); return; }
+  if(remapOn() && (nT || nR || nS)){
     var what = [];
     if(nT) what.push(nT + (nT===1?' taula de dades':' taules de dades'));
     if(nR) what.push(nR + (nR===1?' pàgina marcada':' pàgines marcades'));
+    if(nS) what.push('el mapa de ' + nS + ' fulls d\'esquema');
     if(!confirm(what.join(' i ') + ' són a pàgines que no són de cap conjunt, i per tant no són al ' +
         'PDF renumerat: quedaran fora del JSON.\n\nPer pujar-les al field app, desmarca la renumeració i ' +
         'fes servir el manual sencer com a PDF.\n\nExporto igualment?')) return;
@@ -3754,6 +3904,7 @@ els.exportCombinedBtn.addEventListener('click', function(){
   if(nC) parts.push(nC + (nC===1?' conjunt':' conjunts'));
   if(nT && !remapOn()) parts.push(nT + (nT===1?' taula':' taules'));
   if(nR && !remapOn()) parts.push(nR + (nR===1?' pàgina':' pàgines'));
+  if(nS && !remapOn()) parts.push(nS + ' fulls');
   showToast('Exportat: ' + fn + ' (' + parts.join(', ') + ')');
 });
 els.exportCatalogBtn.addEventListener('click', function(){
@@ -3818,7 +3969,7 @@ function importCatalogJson(data){
     : (Array.isArray(data) ? data : null));
   // A JSON may carry only data tables or marked pages (no conjunt at all) and
   // still be valid.
-  if(!list && data && (Array.isArray(data.tables) || Array.isArray(data.refs))) list = [];
+  if(!list && data && (Array.isArray(data.tables) || Array.isArray(data.refs) || Array.isArray(data.sheets))) list = [];
   if(!list){ showToast('El JSON no sembla un catàleg vàlid.'); return; }
   normalizeConjunts(list); // migrate legacy flat-rows shape; ensure subgrups + num
   list.forEach(function(c){
@@ -3843,15 +3994,23 @@ function importCatalogJson(data){
     });
     state.refs.sort(byRefPage);
   }
+  var nS = 0;
+  if(data && Array.isArray(data.sheets) && data.sheets.length){
+    var havePage = {}; state.sheets.forEach(function(x){ havePage[x.page] = 1; });
+    normalizeSheets(data.sheets).forEach(function(x){ if(havePage[x.page]) return; state.sheets.push(x); havePage[x.page] = 1; nS++; });
+    state.sheets.sort(function(a,b){ return a.page - b.page; });
+  }
   persistConjunts();
   renderMachinePanel();
   renderConjuntsPanel();
   renderTablesPanel();
   renderRefsPanel();
+  renderSheetsPanel();
   var parts = [];
   if(list.length) parts.push(list.length + (list.length===1 ? ' conjunt' : ' conjunts'));
   if(nT) parts.push(nT + (nT===1 ? ' taula' : ' taules'));
   if(nR) parts.push(nR + (nR===1 ? ' pàgina marcada' : ' pàgines marcades'));
+  if(nS) parts.push(nS + ' fulls d\'esquema');
   showToast(parts.length ? (parts.join(', ') + ' importats.') : 'El JSON no portava res per importar.');
 }
 els.importJsonBtn.addEventListener('click', function(){ els.importJsonInput.click(); });
