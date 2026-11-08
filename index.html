@@ -1091,8 +1091,10 @@ function buildPickItems(tc, viewport){
     var t = pdfjsLib.Util.transform(viewport.transform, it.transform);
     var fh = Math.hypot(t[2], t[3]) || 12;              // font height on canvas
     var w = (it.width || 0) * viewport.scale;            // item width on canvas
+    var tr = it.transform;
+    var ang = ((Math.round(Math.atan2(tr[1], tr[0])*180/Math.PI) % 360) + 360) % 360;
     items.push({ x: t[4], y: t[5] - fh, w: w, h: fh * 1.25, str: it.str,
-                 px: it.transform[4], py: it.transform[5], pw: it.width || 0 });
+                 px: tr[4], py: tr[5], pw: it.width || 0, rot: ang });
   });
   return items;
 }
@@ -2197,12 +2199,16 @@ function openColMap(grid, page, opts){
       for(var i=0;i<grid.cols.length;i++) roles.push('');
     }
     if(dt.colRoles && dt.colRoles.length === grid.cols.length) roles = dt.colRoles.slice();
+    var hdrs = opts && opts.headers;
+    if(hdrs && !allowed){
+      roles = roles.map(function(r, i){ return r || hdrs[i] || ''; });
+    }
   } else {
     roles = guessRoles(grid);
     var pre = (state.colLayout && state.colLayout.roles) || lastColRoles;
     if(pre && pre.length === grid.cols.length) roles = pre.slice(); // reuse a known layout
   }
-  pendingColMap = {grid:grid, page:page, sg:(opts&&opts.sg)||null, table:dt, onLayout:(opts&&opts.onLayout)||null, onCancel:(opts&&opts.onCancel)||null, roles:roles};
+  pendingColMap = {grid:grid, page:page, sg:(opts&&opts.sg)||null, table:dt, headers:(opts&&opts.headers)||null, onLayout:(opts&&opts.onLayout)||null, onCancel:(opts&&opts.onCancel)||null, roles:roles};
   els.colMapConfirm.textContent = pendingColMap.onLayout ? 'Desa les columnes' : 'Importa les files';
   renderColMap();
   els.colMapOverlay.classList.add('open');
@@ -2223,7 +2229,8 @@ function renderColMap(){
       var opts = choices.map(function(o){ return '<option value="'+o.v+'"'+(o.v===pc.roles[c]?' selected':'')+'>'+escHtml(o.label)+'</option>'; }).join('');
       ctrl = '<select data-c="'+c+'">'+opts+'</select>';
     }
-    html += '<th data-c="'+c+'" class="'+(pc.roles[c]?'':'ignored')+'"><span class="colIdx">Columna '+(c+1)+'</span><br>'+ctrl+'</th>';
+    var hint = (pc.headers && pc.headers[c]) ? ' · <em>' + escHtml(pc.headers[c]) + '</em>' : '';
+    html += '<th data-c="'+c+'" class="'+(pc.roles[c]?'':'ignored')+'"><span class="colIdx">Columna '+(c+1)+hint+'</span><br>'+ctrl+'</th>';
   }
   html += '</tr></thead><tbody>';
   grid.rows.slice(0,8).forEach(function(r){
@@ -3005,7 +3012,7 @@ function dtFieldLabel(t, f){ return (t && t.labels && t.labels[f]) || fieldLabel
 // app can read: "Nº de full" -> "n_de_full".
 function slugField(s){
   return (s||'').toString().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,24);
+    .toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,48);
 }
 // The fields a table's rows are keyed by: its kind's set, or -- for a free
 // table -- whatever columns have been named so far.
@@ -3170,6 +3177,91 @@ function renderTableDetail(){
   table.appendChild(tbody);
   els.dtRowsWrap.appendChild(table);
 }
+// A matrix whose column headings are written slantwise -- the commercial
+// component maintenance plan sets thirteen tasks at 45° over thirteen columns
+// of D / S-W / M / B -- defeats the column detector twice over: the headings
+// are text at an angle the grid doesn't read, and the columns under them are
+// too sparse (three marks in twenty-four rows) to show up as ink. But the
+// headings ARE the columns. Each one starts at the top of its band and runs
+// down to the right, and the cells sit directly under the point where it
+// reaches the band's bottom edge; so the headings, read in order, give both
+// the column edges and the column names. The slanted text comes back in
+// fragments, which are strung back together along their own line (same
+// across-coordinate), and a heading that wraps onto a second line is one
+// line-height away across and gets folded in. Vertical headings (90°) are the
+// same thing with a zero slope.
+function rotatedHeaderColumns(pageItems, marked, grid){
+  if(!marked.length || !grid.cols.length) return null;
+  var minX = Infinity, maxX = -Infinity, topY = -Infinity, rowGap = [];
+  marked.forEach(function(it){ if(it.px < minX) minX = it.px; if(it.px > maxX) maxX = it.px; if(it.py > topY) topY = it.py; });
+  var ys = {}; marked.forEach(function(it){ ys[Math.round(it.py)] = 1; });
+  var yk = Object.keys(ys).map(Number).sort(function(a,b){ return b-a; });
+  for(var i=1;i<yk.length;i++) rowGap.push(yk[i-1]-yk[i]);
+  rowGap.sort(function(a,b){ return a-b; });
+  var rowH = rowGap.length ? rowGap[Math.floor(rowGap.length/2)] : 10;
+  var bandBottom = topY + rowH * 0.6;
+  // candidates: slanted or vertical text in a band above the marked rows
+  var cand = pageItems.filter(function(it){
+    var r = it.rot || 0;
+    if(r === 0 || r === 180) return false;
+    return it.py > topY + 2 && it.py < topY + 260 && it.px > minX - 60 && it.px < maxX + 80;
+  });
+  if(cand.length < 2) return null;
+  var byRot = {}; cand.forEach(function(it){ byRot[it.rot] = (byRot[it.rot]||0)+1; });
+  var rot = parseInt(Object.keys(byRot).sort(function(a,b){ return byRot[b]-byRot[a]; })[0], 10);
+  cand = cand.filter(function(it){ return it.rot === rot; });
+  var rad = rot*Math.PI/180, c = Math.cos(rad), sn = Math.sin(rad);
+  if(sn > -0.2 && sn < 0.2) return null;             // (near) horizontal: not a heading band
+  function along(it){ return c*it.px + sn*it.py; }
+  function across(it){ return -sn*it.px + c*it.py; }
+  // string the fragments of each heading line together
+  var lines = [];
+  cand.sort(function(a,b){ return across(a)-across(b) || along(a)-along(b); }).forEach(function(it){
+    var L = lines.length ? lines[lines.length-1] : null;
+    if(L && Math.abs(across(it) - L.a) < 4){ L.items.push(it); return; }
+    lines.push({a: across(it), items:[it]});
+  });
+  lines.forEach(function(L){
+    L.items.sort(function(x,y){ return along(x)-along(y); });
+    L.text = L.items.map(function(it){ return it.str.trim(); }).join(' ').replace(/\s+/g,' ').trim();
+    L.start = L.items[0];
+  });
+  // A heading that wraps puts its second line one line-height off across,
+  // on the lower side -- so, read in across order, the continuation comes
+  // FIRST and its heading right after it, starting higher on the page. A
+  // heading that has just taken a continuation is complete and can't be one
+  // itself, which is what keeps two wrapped headings side by side from
+  // swallowing each other's second lines.
+  var labels = [], pending = null;
+  lines.forEach(function(L){
+    var lab = {a: L.a, text: L.text, start: L.start};
+    if(pending && (L.a - pending.a) >= 5 && (L.a - pending.a) <= 13 && L.start.py > pending.start.py){
+      labels.pop();
+      lab.text = L.text + ' ' + pending.text;
+      labels.push(lab);
+      pending = null;
+      return;
+    }
+    labels.push(lab);
+    pending = lab;
+  });
+  if(labels.length < 2) return null;
+  // where each heading's line meets the bottom of the band is its column
+  labels.forEach(function(lb){
+    var st = lb.start;
+    lb.colX = (Math.abs(c) < 0.1) ? st.px : st.px + (st.py - bandBottom) * (c / -sn);
+  });
+  labels.sort(function(x,y){ return x.colX - y.colX; });
+  var gaps = [];
+  for(var j=1;j<labels.length;j++) gaps.push(labels[j].colX - labels[j-1].colX);
+  gaps.sort(function(a,b){ return a-b; });
+  var pitch = gaps.length ? gaps[Math.floor(gaps.length/2)] : 20;
+  if(pitch < 6) return null;
+  var firstEdge = labels[0].colX - pitch/2;
+  var cols = grid.cols.filter(function(x){ return x < firstEdge - 4; }), headers = cols.map(function(){ return null; });
+  labels.forEach(function(lb){ cols.push(lb.colX - pitch/2); headers.push(lb.text); });
+  return {cols: cols, headers: headers, rows: rowsFromItems(marked, cols)};
+}
 // Appends a marked grid's rows to a table and records the page they came from.
 function dtAddRows(t, grid, roles, page){
   var added = 0;
@@ -3227,10 +3319,14 @@ els.dtMarkBtn.addEventListener('click', function(){
   startPicking(dtPageOf(t), function(items, page){
     var grid = itemsToGrid(items);
     if(!grid.cols.length || !grid.rows.length){ showToast('Cap taula reconeguda en aquesta selecció.'); return; }
-    // Same column count as the last mark on this table -> straight in, so a
-    // list spread over four pages is four drags and no questions.
-    if(t.colRoles && t.colRoles.length === grid.cols.length){ dtAddRows(t, grid, t.colRoles, page); return; }
-    openColMap(grid, page, {table: t});
+    getPageItemsFull(page).then(function(pageItems){
+      var hdr = rotatedHeaderColumns(pageItems, items, grid);
+      if(hdr){ grid = {cols: hdr.cols, rows: hdr.rows}; }
+      // Same column count as the last mark on this table -> straight in, so a
+      // list spread over four pages is four drags and no questions.
+      if(t.colRoles && t.colRoles.length === grid.cols.length){ dtAddRows(t, grid, t.colRoles, page); return; }
+      openColMap(grid, page, {table: t, headers: hdr ? hdr.headers : null});
+    });
   }, 'rows');
 });
 els.dtAddRowBtn.addEventListener('click', function(){
