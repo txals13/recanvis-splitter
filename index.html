@@ -157,6 +157,11 @@
   #refsPanelHeader strong{font-size:13px; margin-right:4px;}
   #refChipsList{display:flex; flex-wrap:wrap; gap:10px;}
   #refModalCard{width:min(620px,94vw);}
+  #machineCardCard{width:min(760px,94vw);}
+  .mcRow{display:grid; grid-template-columns:190px 1fr auto; gap:8px; align-items:center; margin-bottom:8px;}
+  .mcRow label{font-size:12px; color:var(--muted);}
+  .mcRow input{width:100%;}
+  #mcPageInput{width:70px;}
   #rfLabelInput{width:300px;}
   #rfPageInput{width:70px;}
   #rfKindSelect{max-width:320px;}
@@ -290,6 +295,7 @@
   <input type="text" id="machSerial" placeholder="Núm. de sèrie"><button id="pickSerialBtn" title="Tria el núm. de sèrie arrossegant sobre la portada">🎯</button>
   <input type="text" id="machModel" placeholder="Model"><button id="pickModelBtn" title="Tria el model arrossegant sobre la portada">🎯</button>
   <input type="text" id="machClient" placeholder="Client"><button id="pickClientBtn" title="Tria el client arrossegant sobre la portada">🎯</button>
+  <button id="machineCardBtn" title="Totes les dades de la màquina: projecte, any, tensió, potència, aire…">Fitxa de màquina</button>
   <span id="portadaInfo">Portada: —</span>
   <button id="portadaClearBtn" style="display:none;">Treu portada</button>
   <span id="colsInfo" style="font-size:12px; color:var(--muted);">Columnes: —</span>
@@ -407,6 +413,26 @@
         <button id="menuImportCancel">Cancel·la</button>
         <button class="primary" id="menuImportConfirm">Importa</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="machineCardOverlay">
+  <div class="reviewCard" id="machineCardCard">
+    <div class="reviewTop">
+      <strong>Fitxa de màquina</strong>
+      <button id="mcCloseBtn" style="margin-left:auto;">Tanca ✕</button>
+    </div>
+    <div class="dtRow">
+      <span class="dtLabel">Pàgina d'on triar</span>
+      <input type="text" id="mcPageInput" placeholder="8">
+      <button id="mcOpenPageBtn">Obre-la</button>
+      <span class="dtLabel">el 🎯 de cada camp hi va a buscar el text; al manual del BPF-140 són la 8 (dades generals) i la 15 (potència i aire)</span>
+    </div>
+    <div id="mcFields"></div>
+    <div class="reviewActions">
+      <div class="left"></div>
+      <div class="right"><button class="primary" id="mcDoneBtn">Fet</button></div>
     </div>
   </div>
 </div>
@@ -663,7 +689,14 @@ var els = {
   rfPageInput: document.getElementById('rfPageInput'),
   rfOpenPageBtn: document.getElementById('rfOpenPageBtn'),
   rfDeleteBtn: document.getElementById('rfDeleteBtn'),
-  rfDoneBtn: document.getElementById('rfDoneBtn')
+  rfDoneBtn: document.getElementById('rfDoneBtn'),
+  machineCardBtn: document.getElementById('machineCardBtn'),
+  machineCardOverlay: document.getElementById('machineCardOverlay'),
+  mcCloseBtn: document.getElementById('mcCloseBtn'),
+  mcDoneBtn: document.getElementById('mcDoneBtn'),
+  mcPageInput: document.getElementById('mcPageInput'),
+  mcOpenPageBtn: document.getElementById('mcOpenPageBtn'),
+  mcFields: document.getElementById('mcFields')
 };
 
 var state = {
@@ -679,6 +712,7 @@ var state = {
   conjunts: [],
   machine: {serial:'',model:'',client:''},
   portadaPage: null,
+  specPage: null,      // the page the machine card's pickers go to (data sheet)
   colLayout: null,     // {cols:[x…], roles:[role…]} — manual-wide column layout
   currentConjuntId: null,
   editingGrup: null,
@@ -726,7 +760,7 @@ function resetApp(){
   state.selected = new Set(); state.cells = [];
   state.conjunts = []; state.editingGrup = null; state.currentConjuntId = null;
   state.pendingMenuImport = null;
-  state.machine = emptyMachine(); state.portadaPage = null; state.colLayout = null;
+  state.machine = emptyMachine(); state.portadaPage = null; state.specPage = null; state.colLayout = null;
   state.tables = []; state.editingTable = null;
   state.refs = []; state.editingRef = null;
   if(muDoc != null && muMod){ try{ muMod.freeDocument(muDoc); }catch(e){} }
@@ -778,6 +812,7 @@ function loadPdf(bytesForPdfjs){
     var cat = loadCatalogForFile(state.fileName);
     state.machine = cat.machine;
     state.portadaPage = cat.portadaPage;
+    state.specPage = cat.specPage;
     state.colLayout = cat.colLayout;
     state.conjunts = cat.conjunts;
     state.tables = cat.tables;
@@ -1275,16 +1310,45 @@ function loadAllCatalogs(){
   try{ return JSON.parse(localStorage.getItem(CATALOG_LS_KEY) || '{}'); }
   catch(e){ return {}; }
 }
-function emptyMachine(){ return {serial:'', model:'', client:''}; }
+// What a machine is, for the field app: the three the panel always shows,
+// and then what the manual's data sheet says about it -- project, year, where
+// it stands, what it's fed with. Every one of them is picked off the page
+// with the same gesture as the serial number. The list is the single place
+// the fields are named; the panel, the card, the export and the import all
+// read it.
+var MACHINE_FIELDS = [
+  {k:'serial',       label:'Núm. de sèrie'},
+  {k:'model',        label:'Model'},
+  {k:'client',       label:'Client'},
+  {k:'manufacturer', label:'Fabricant'},
+  {k:'project',      label:'Projecte / comanda'},
+  {k:'year',         label:'Any de fabricació'},
+  {k:'purpose',      label:'Ús previst'},
+  {k:'site',         label:'Ubicació final'},
+  {k:'voltage',      label:'Tensió'},
+  {k:'freq',         label:'Freqüència'},
+  {k:'power',        label:'Potència instal·lada (kW)'},
+  {k:'airBar',       label:'Pressió d\'aire (bar)'},
+  {k:'airLpm',       label:'Consum d\'aire (L/min)'}
+];
+function emptyMachine(){
+  var m = {};
+  MACHINE_FIELDS.forEach(function(f){ m[f.k] = ''; });
+  return m;
+}
+function machineFilledCount(){
+  return MACHINE_FIELDS.filter(function(f){ return (state.machine[f.k]||'').toString().trim(); }).length;
+}
 // A stored catalog is now { machine, portadaPage, conjunts }. Older stores
 // held just the bare conjunts array — migrate those on read.
 function loadCatalogForFile(fileName){
   var raw = loadAllCatalogs()[fileName];
-  if(!raw) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:[], tables:[], refs:[] };
-  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:normalizeConjunts(raw), tables:[], refs:[] };
+  if(!raw) return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:[], tables:[], refs:[] };
+  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:normalizeConjunts(raw), tables:[], refs:[] };
   return {
     machine: Object.assign(emptyMachine(), raw.machine || {}),
     portadaPage: raw.portadaPage || null,
+    specPage: raw.specPage || null,
     colLayout: raw.colLayout || null,
     conjunts: normalizeConjunts(raw.conjunts || []),
     tables: normalizeTables(raw.tables || []),
@@ -1333,7 +1397,7 @@ function grupRowCount(g){
 }
 function persistConjunts(){
   var all = loadAllCatalogs();
-  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables, refs: state.refs };
+  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, specPage: state.specPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables, refs: state.refs };
   localStorage.setItem(CATALOG_LS_KEY, JSON.stringify(all));
 }
 function uid(){
@@ -2284,6 +2348,7 @@ function renderMachinePanel(){
   els.machSerial.value = state.machine.serial || '';
   els.machModel.value = state.machine.model || '';
   els.machClient.value = state.machine.client || '';
+  els.machineCardBtn.textContent = 'Fitxa de màquina (' + machineFilledCount() + ' de ' + MACHINE_FIELDS.length + ')';
   if(state.portadaPage){
     els.portadaInfo.textContent = 'Portada: pàg. ' + state.portadaPage + ' (clica per veure)';
     els.portadaInfo.style.cursor = 'pointer';
@@ -2825,6 +2890,7 @@ document.addEventListener('keydown', function(e){
   if(els.nameModalOverlay.classList.contains('open')){ cancelNameModal(); return; }
   if(els.menuImportOverlay.classList.contains('open')){ cancelMenuImport(); return; }
   if(els.grupModalOverlay.classList.contains('open')){ els.reviewCancelBtn.click(); return; }
+  if(els.machineCardOverlay.classList.contains('open')){ closeMachineCard(); return; }
   if(els.refModalOverlay.classList.contains('open')){ closeRefDetail(); return; }
   if(els.tableDetailOverlay.classList.contains('open')){ closeTableDetail(); return; }
   if(els.conjuntDetailOverlay.classList.contains('open')){ closeConjuntDetail(); return; }
@@ -3151,6 +3217,66 @@ els.dtDeleteBtn.addEventListener('click', function(){
 els.dtDoneBtn.addEventListener('click', closeTableDetail);
 els.tableDetailCloseBtn.addEventListener('click', closeTableDetail);
 els.tableDetailOverlay.addEventListener('click', function(e){ if(e.target === els.tableDetailOverlay) closeTableDetail(); });
+
+// ===== Machine card ========================================================
+// The panel keeps the three fields that name the machine; the card holds the
+// rest of what the data sheet says. Each field has the same pointer the
+// serial number has had all along, aimed at a page you choose -- the sheet
+// isn't the cover, and in this manual the general data and the power data
+// aren't even on the same page -- and that page is remembered with the
+// catalog, so the next field's pointer goes straight back to it.
+function mcPickSource(){
+  var n = parseInt(els.mcPageInput.value, 10);
+  if(!isNaN(n) && n >= 1 && n <= state.numPages) return n;
+  return state.specPage || machPickSource();
+}
+function openMachineCard(){
+  els.mcPageInput.value = state.specPage || machPickSource() || '';
+  renderMachineCard();
+  els.machineCardOverlay.classList.add('open');
+}
+function closeMachineCard(){
+  els.machineCardOverlay.classList.remove('open');
+  persistConjunts();
+  renderMachinePanel();
+}
+function renderMachineCard(){
+  els.mcFields.innerHTML = '';
+  MACHINE_FIELDS.forEach(function(f){
+    var row = document.createElement('div'); row.className = 'mcRow';
+    var lab = document.createElement('label'); lab.textContent = f.label; lab.htmlFor = 'mc_' + f.k;
+    var inp = document.createElement('input'); inp.type = 'text'; inp.id = 'mc_' + f.k;
+    inp.value = state.machine[f.k] || '';
+    inp.addEventListener('input', function(){ state.machine[f.k] = inp.value; });
+    inp.addEventListener('change', function(){ persistConjunts(); renderMachinePanel(); });
+    var pick = document.createElement('button'); pick.textContent = '🎯';
+    pick.title = 'Tria el valor arrossegant sobre la pàgina ' + (mcPickSource() || '');
+    pick.addEventListener('click', function(){
+      startPicking(mcPickSource(), function(text){
+        text = (text||'').trim();
+        if(!text) return;
+        state.machine[f.k] = text;
+        inp.value = text;
+        persistConjunts();
+        renderMachinePanel();
+      });
+    });
+    row.appendChild(lab); row.appendChild(inp); row.appendChild(pick);
+    els.mcFields.appendChild(row);
+  });
+}
+els.machineCardBtn.addEventListener('click', openMachineCard);
+els.mcPageInput.addEventListener('change', function(){
+  var n = parseInt(els.mcPageInput.value, 10);
+  if(isNaN(n) || n < 1 || n > state.numPages){ els.mcPageInput.value = state.specPage || ''; showToast('Aquesta pàgina no és al manual.'); return; }
+  state.specPage = n;
+  persistConjunts();
+  renderMachineCard(); // the pointers' tooltips name the page
+});
+els.mcOpenPageBtn.addEventListener('click', function(){ var p = mcPickSource(); if(p) openModal(p); });
+els.mcDoneBtn.addEventListener('click', closeMachineCard);
+els.mcCloseBtn.addEventListener('click', closeMachineCard);
+els.machineCardOverlay.addEventListener('click', function(e){ if(e.target === els.machineCardOverlay) closeMachineCard(); });
 
 // ===== Marked pages ========================================================
 // Some of what a manual knows isn't text at all. Where the consignation points
@@ -3701,7 +3827,7 @@ function importCatalogJson(data){
     state.conjunts.push(c);
   });
   if(data && data.machine){
-    ['serial','model','client'].forEach(function(k){ if(!state.machine[k] && data.machine[k]) state.machine[k] = data.machine[k]; });
+    MACHINE_FIELDS.forEach(function(f){ var k = f.k; if(!state.machine[k] && data.machine[k]) state.machine[k] = data.machine[k]; });
   }
   if(!state.portadaPage && data && data.portadaPage) state.portadaPage = data.portadaPage;
   var nT = 0, nR = 0;
