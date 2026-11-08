@@ -141,6 +141,36 @@
   }
   .conjuntChip .gDel:hover{border-color:var(--danger); color:var(--danger);}
 
+  /* ---- Data tables: the manual's tables that don't hang off a drawing ---- */
+  #tablesPanel{
+    display:none; border-bottom:1px solid var(--border); padding:12px 16px;
+    background:var(--panel);
+  }
+  #tablesPanelHeader{display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;}
+  #tablesPanelHeader strong{font-size:13px; margin-right:4px;}
+  #tableChipsList{display:flex; flex-wrap:wrap; gap:10px;}
+  .dtRow{display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;}
+  .dtRow .dtLabel{font-size:12px; color:var(--muted);}
+  #dtNameInput{width:260px;}
+  #dtPagesInput{width:120px;}
+  #dtPageInput{width:70px;}
+  #dtKindSelect{max-width:320px;}
+  #dtFieldsInfo{font-size:11px; color:var(--muted); margin-bottom:10px;}
+  #dtRowsWrap{overflow:auto; max-height:46vh; margin-bottom:12px;}
+  table.rowsTable td.dtCell input{width:100%; min-width:70px;}
+  table.rowsTable td.dtCell-denominacio input,
+  table.rowsTable td.dtCell-element input,
+  table.rowsTable td.dtCell-accio input,
+  table.rowsTable td.dtCell-param input{min-width:240px;}
+  table.rowsTable td.dtCell-obs input{min-width:160px;}
+  table.rowsTable td.dtCell-ref input,
+  table.rowsTable td.dtCell-tag input,
+  table.rowsTable td.dtCell-codi input,
+  table.rowsTable td.dtCell-tipus input{min-width:110px;}
+  table.rowsTable th.pageCol, table.rowsTable td.pageCol{width:56px;}
+  table.rowsTable td.pageCol input{width:52px;}
+  table.colMapTable th input[type=text]{width:100%; margin-top:4px;}
+
   .overlay{
     position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:100;
     display:none; align-items:center; justify-content:center; flex-direction:column;
@@ -240,6 +270,7 @@
   <button id="selectAllBtn">Selecciona-ho tot</button>
   <button id="clearSelBtn">Neteja selecció</button>
   <button id="createConjuntBtn">Crea un conjunt</button>
+  <button id="createTableBtn">Crea una taula de dades</button>
   <button id="newFileBtn">Obre un altre PDF</button>
 </header>
 
@@ -268,6 +299,14 @@
     </label>
   </div>
   <div id="conjuntChipsList"></div>
+</div>
+
+<div id="tablesPanel">
+  <div id="tablesPanelHeader">
+    <strong>Taules de dades</strong>
+    <span style="font-size:12px; color:var(--muted);">les taules del manual que no pengen de cap dibuix</span>
+  </div>
+  <div id="tableChipsList"></div>
 </div>
 
 <div id="status"></div>
@@ -347,6 +386,42 @@
       <div class="right">
         <button id="menuImportCancel">Cancel·la</button>
         <button class="primary" id="menuImportConfirm">Importa</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="tableDetailOverlay">
+  <div class="reviewCard" id="tableDetailCard">
+    <div class="reviewTop">
+      <strong>Taula de dades</strong>
+      <button id="tableDetailCloseBtn" style="margin-left:auto;">Tanca ✕</button>
+    </div>
+    <div class="dtRow">
+      <span class="dtLabel">Nom</span>
+      <input type="text" id="dtNameInput" placeholder="ex: Recanvis recomanats">
+      <button id="dtPickNameBtn" title="Tria el nom arrossegant un requadre sobre el full">🎯 Nom</button>
+      <span class="dtLabel">Mena</span>
+      <select id="dtKindSelect"></select>
+    </div>
+    <div class="dtRow">
+      <span class="dtLabel">Pàgines</span>
+      <input type="text" id="dtPagesInput" placeholder="ex: 128-131">
+      <button id="dtUseSelBtn">Assigna la selecció</button>
+      <span class="dtLabel" style="margin-left:10px;">Marca a la pàgina</span>
+      <input type="text" id="dtPageInput" placeholder="128">
+      <button id="dtMarkBtn">🎯 Marca les files</button>
+    </div>
+    <div id="dtFieldsInfo"></div>
+    <div id="dtRowsWrap"></div>
+    <div class="reviewActions">
+      <div class="left">
+        <button id="dtDeleteBtn">Elimina la taula</button>
+        <button id="dtClearRowsBtn">Buida les files</button>
+      </div>
+      <div class="right">
+        <button id="dtAddRowBtn">+ Afegeix fila</button>
+        <button class="primary" id="dtDoneBtn">Fet</button>
       </div>
     </div>
   </div>
@@ -513,7 +588,25 @@ var els = {
   reviewThumbs: document.getElementById('reviewThumbs'),
   deleteGrupBtn: document.getElementById('deleteGrupBtn'),
   reviewCancelBtn: document.getElementById('reviewCancelBtn'),
-  reviewSaveBtn: document.getElementById('reviewSaveBtn')
+  reviewSaveBtn: document.getElementById('reviewSaveBtn'),
+  createTableBtn: document.getElementById('createTableBtn'),
+  tablesPanel: document.getElementById('tablesPanel'),
+  tableChipsList: document.getElementById('tableChipsList'),
+  tableDetailOverlay: document.getElementById('tableDetailOverlay'),
+  tableDetailCloseBtn: document.getElementById('tableDetailCloseBtn'),
+  dtNameInput: document.getElementById('dtNameInput'),
+  dtPickNameBtn: document.getElementById('dtPickNameBtn'),
+  dtKindSelect: document.getElementById('dtKindSelect'),
+  dtPagesInput: document.getElementById('dtPagesInput'),
+  dtUseSelBtn: document.getElementById('dtUseSelBtn'),
+  dtPageInput: document.getElementById('dtPageInput'),
+  dtMarkBtn: document.getElementById('dtMarkBtn'),
+  dtFieldsInfo: document.getElementById('dtFieldsInfo'),
+  dtRowsWrap: document.getElementById('dtRowsWrap'),
+  dtDeleteBtn: document.getElementById('dtDeleteBtn'),
+  dtClearRowsBtn: document.getElementById('dtClearRowsBtn'),
+  dtAddRowBtn: document.getElementById('dtAddRowBtn'),
+  dtDoneBtn: document.getElementById('dtDoneBtn')
 };
 
 var state = {
@@ -536,7 +629,9 @@ var state = {
   pickingTarget: null, // callback while picking from the drawing
   pickingCancel: null, // runs if picking is abandoned without a selection
   pickingMode: 'text', // 'text' (name / number) | 'rows' (mark parts-list rows)
-  pickItems: []        // per-item text geometry (canvas space) for the current modal page
+  pickItems: [],       // per-item text geometry (canvas space) for the current modal page
+  tables: [],          // manual-wide data tables (spares list, electrical BOM, plans)
+  editingTable: null   // id of the data table open in its detail view
 };
 
 function showToast(msg, ms){
@@ -573,6 +668,7 @@ function resetApp(){
   state.conjunts = []; state.editingGrup = null; state.currentConjuntId = null;
   state.pendingMenuImport = null;
   state.machine = emptyMachine(); state.portadaPage = null; state.colLayout = null;
+  state.tables = []; state.editingTable = null;
   if(muDoc != null && muMod){ try{ muMod.freeDocument(muDoc); }catch(e){} }
   muDoc = null; muDocFor = null; // the wasm module itself is kept for the session
   els.grid.innerHTML = '';
@@ -581,6 +677,8 @@ function resetApp(){
   els.machinePanel.style.display = 'none';
   els.conjuntsPanel.style.display = 'none';
   els.conjuntChipsList.innerHTML = '';
+  els.tablesPanel.style.display = 'none';
+  els.tableChipsList.innerHTML = '';
   els.dropzone.style.display = 'block';
   els.fileInput.value = '';
   setStatus('');
@@ -620,8 +718,10 @@ function loadPdf(bytesForPdfjs){
     state.portadaPage = cat.portadaPage;
     state.colLayout = cat.colLayout;
     state.conjunts = cat.conjunts;
+    state.tables = cat.tables;
     renderMachinePanel();
     renderConjuntsPanel();
+    renderTablesPanel();
   }).catch(function(err){
     console.error(err);
     setStatus('');
@@ -1095,13 +1195,14 @@ function emptyMachine(){ return {serial:'', model:'', client:''}; }
 // held just the bare conjunts array — migrate those on read.
 function loadCatalogForFile(fileName){
   var raw = loadAllCatalogs()[fileName];
-  if(!raw) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:[] };
-  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:normalizeConjunts(raw) };
+  if(!raw) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:[], tables:[] };
+  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, colLayout:null, conjunts:normalizeConjunts(raw), tables:[] };
   return {
     machine: Object.assign(emptyMachine(), raw.machine || {}),
     portadaPage: raw.portadaPage || null,
     colLayout: raw.colLayout || null,
-    conjunts: normalizeConjunts(raw.conjunts || [])
+    conjunts: normalizeConjunts(raw.conjunts || []),
+    tables: normalizeTables(raw.tables || [])
   };
 }
 // Migrates stored conjunts to the current hierarchy:
@@ -1146,7 +1247,7 @@ function grupRowCount(g){
 }
 function persistConjunts(){
   var all = loadAllCatalogs();
-  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, colLayout: state.colLayout, conjunts: state.conjunts };
+  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables };
   localStorage.setItem(CATALOG_LS_KEY, JSON.stringify(all));
 }
 function uid(){
@@ -1524,6 +1625,7 @@ function parseLineToRow(text, page){
 // blur the gaps the way a raw ink histogram would.)
 function itemsToGrid(items){
   if(!items.length) return {cols:[], rows:[]};
+  items = itemsInTableAxes(items);
   var minX = Infinity, maxX = -Infinity;
   items.forEach(function(it){ if(it.px < minX) minX = it.px; var e = it.px + (it.pw||0); if(e > maxX) maxX = e; });
   // group items into rows by baseline (Y)
@@ -1551,7 +1653,58 @@ function itemsToGrid(items){
     else { gapRun++; if(inCol && gapRun >= gapMin) inCol = false; }
   }
   if(!cols.length) cols = [minX];
+  // A separator doesn't have to be a band of white. Two columns printed a hair
+  // apart -- the recommended-spares list sets its quantity 3 px from the
+  // material code -- leave no gap wide enough to see, and the two land in one
+  // cell ("1 MR"). But every single row breaks its run at that same x, and
+  // that's the other face of a column: an x where most rows START a new item
+  // after a real gap. The gap has to be a real one (>= 2 px), because a run
+  // broken by AutoCAD's own kerning leaves none -- that's a word, not a
+  // column. Only the local peak of each cluster is taken, so sub-pixel jitter
+  // across rows adds one edge and not three.
+  var startHist = {};
+  lines.forEach(function(l){
+    var its = l.items.slice().sort(function(a,b){ return a.px - b.px; }), prevEnd = null, seen = {};
+    its.forEach(function(it){
+      if(prevEnd !== null && (it.px - prevEnd) >= 2){
+        var k = Math.round(it.px);
+        if(!seen[k]){ seen[k] = 1; startHist[k] = (startHist[k]||0) + 1; }
+      }
+      var end = it.px + (it.pw||0);
+      if(prevEnd === null || end > prevEnd) prevEnd = end;
+    });
+  });
+  var thrStart = Math.max(4, Math.ceil(nRows*0.6));
+  Object.keys(startHist).forEach(function(key){
+    var k = parseInt(key, 10), h = startHist[k], hl = startHist[k-1]||0, hr = startHist[k+1]||0;
+    if(h < hl || h < hr) return;              // not the cluster's peak
+    if(Math.min(nRows, h + hl + hr) < thrStart) return;
+    for(var j=0;j<cols.length;j++) if(Math.abs(cols[j] - k) < 6) return;
+    cols.push(k);
+  });
+  cols.sort(function(a,b){ return a-b; });
   return {cols: cols, rows: rowsFromItems(items, cols)};
+}
+// A sheet plotted landscape has its table rows running UP the page instead of
+// across it: the electrical material lists put one component per column, every
+// item at 90°, so read as ordinary lines they come out transposed -- one line
+// per field, with all the manufacturers on it. Nothing about the table is
+// different, only which page coordinate is which, so the grid is built in the
+// table's own axes (u along the reading direction, v across it, as uvOf
+// defines them) and the rest of the engine needs no idea that the sheet was
+// turned. v is signed so that sorting it downwards is the table's own reading
+// order either way. The dominant angle decides: a stray label plotted the
+// other way round shouldn't turn a table on its side.
+function itemsInTableAxes(items){
+  var count = {}, rot = 0, best = -1;
+  items.forEach(function(it){ var r = it.rot || 0; count[r] = (count[r]||0) + 1; });
+  Object.keys(count).forEach(function(k){ if(count[k] > best){ best = count[k]; rot = parseInt(k,10); } });
+  if(rot !== 90 && rot !== 180 && rot !== 270) return items;
+  return items.map(function(it){
+    var u = (rot === 90) ? it.py : (rot === 180 ? -it.px : -it.py);
+    var v = (rot === 90) ? -it.px : (rot === 180 ? -it.py : it.px);
+    return {px:u, py:v, pw:it.pw, str:it.str, rot:0};
+  });
 }
 // Splits items into text cells using the given column x-starts, rows top→bottom.
 function rowsFromItems(items, cols){
@@ -1847,20 +2000,46 @@ function ensureColLayout(pagesOrPage, onDone, onCancel, force){
 // manual-wide column layout (cols + roles) and call fn().
 function openColMap(grid, page, opts){
   if(!grid.cols.length || !grid.rows.length){ showToast('Cap taula reconeguda en aquesta selecció.'); return; }
-  var roles = guessRoles(grid);
-  var pre = (state.colLayout && state.colLayout.roles) || lastColRoles;
-  if(pre && pre.length === grid.cols.length) roles = pre.slice(); // reuse a known layout
-  pendingColMap = {grid:grid, page:page, sg:(opts&&opts.sg)||null, onLayout:(opts&&opts.onLayout)||null, onCancel:(opts&&opts.onCancel)||null, roles:roles};
+  var dt = (opts && opts.table) || null, roles;
+  if(dt){
+    // A data table has a field set of its own (its kind's), so the parts-list
+    // guesses only survive where the kind happens to name the same field; a
+    // free table starts blank because its columns are named by hand.
+    var allowed = tableKind(dt.kind).fields;
+    roles = [];
+    if(allowed){
+      roles = guessRoles(grid).map(function(r){ return allowed.indexOf(r) >= 0 ? r : ''; });
+    } else {
+      for(var i=0;i<grid.cols.length;i++) roles.push('');
+    }
+    if(dt.colRoles && dt.colRoles.length === grid.cols.length) roles = dt.colRoles.slice();
+  } else {
+    roles = guessRoles(grid);
+    var pre = (state.colLayout && state.colLayout.roles) || lastColRoles;
+    if(pre && pre.length === grid.cols.length) roles = pre.slice(); // reuse a known layout
+  }
+  pendingColMap = {grid:grid, page:page, sg:(opts&&opts.sg)||null, table:dt, onLayout:(opts&&opts.onLayout)||null, onCancel:(opts&&opts.onCancel)||null, roles:roles};
   els.colMapConfirm.textContent = pendingColMap.onLayout ? 'Desa les columnes' : 'Importa les files';
   renderColMap();
   els.colMapOverlay.classList.add('open');
 }
 function renderColMap(){
   var pc = pendingColMap; if(!pc) return;
+  var kindFields = pc.table ? tableKind(pc.table.kind).fields : null;
+  var free = !!(pc.table && !kindFields);
+  var choices = pc.table
+    ? [{v:'', label:'— ignora —'}].concat((kindFields||[]).map(function(f){ return {v:f, label:fieldLabel(f)}; }))
+    : COL_ROLES;
   var grid = pc.grid, nc = grid.cols.length, html = '<table class="colMapTable"><thead><tr>';
   for(var c=0;c<nc;c++){
-    var opts = COL_ROLES.map(function(o){ return '<option value="'+o.v+'"'+(o.v===pc.roles[c]?' selected':'')+'>'+o.label+'</option>'; }).join('');
-    html += '<th data-c="'+c+'" class="'+(pc.roles[c]?'':'ignored')+'"><span class="colIdx">Columna '+(c+1)+'</span><br><select data-c="'+c+'">'+opts+'</select></th>';
+    var ctrl;
+    if(free){
+      ctrl = '<input type="text" data-c="'+c+'" placeholder="nom de la columna" value="'+escHtml(pc.roles[c]||'')+'">';
+    } else {
+      var opts = choices.map(function(o){ return '<option value="'+o.v+'"'+(o.v===pc.roles[c]?' selected':'')+'>'+escHtml(o.label)+'</option>'; }).join('');
+      ctrl = '<select data-c="'+c+'">'+opts+'</select>';
+    }
+    html += '<th data-c="'+c+'" class="'+(pc.roles[c]?'':'ignored')+'"><span class="colIdx">Columna '+(c+1)+'</span><br>'+ctrl+'</th>';
   }
   html += '</tr></thead><tbody>';
   grid.rows.slice(0,8).forEach(function(r){
@@ -1874,6 +2053,13 @@ function renderColMap(){
   els.colMapBody.querySelectorAll('select').forEach(function(sel){
     sel.addEventListener('change', function(){ pendingColMap.roles[parseInt(sel.dataset.c,10)] = sel.value; renderColMap(); });
   });
+  // A free table's column names are typed here. Re-rendering on every
+  // keystroke would eat the focus, so the name is taken as it's typed and the
+  // greying-out of an unnamed column waits for the field to be left.
+  els.colMapBody.querySelectorAll('input[type=text]').forEach(function(inp){
+    inp.addEventListener('input', function(){ pendingColMap.roles[parseInt(inp.dataset.c,10)] = inp.value; });
+    inp.addEventListener('change', function(){ renderColMap(); });
+  });
 }
 function closeColMap(cancelled){
   var pc = pendingColMap;
@@ -1886,6 +2072,31 @@ els.colMapOverlay.addEventListener('click', function(e){ if(e.target === els.col
 els.colMapConfirm.addEventListener('click', function(){
   var pc = pendingColMap; if(!pc) return;
   var roles = pc.roles;
+  // A data table's rows are keyed by its kind's fields and no single column is
+  // obligatory: a spares list has no Pos., a maintenance plan has no Ref.
+  if(pc.table){
+    var dt = pc.table, kf = tableKind(dt.kind).fields, typed = null;
+    if(!kf){ typed = roles.slice(); roles = typed.map(slugField); }
+    if(!roles.some(function(r){ return r; })){
+      showToast(kf ? 'Assigna almenys una columna.' : 'Posa el nom d\'almenys una columna.');
+      return;
+    }
+    dt.colRoles = roles.slice();
+    if(!kf){
+      var fs = (dt.fields||[]).slice(), lbl = Object.assign({}, dt.labels || {});
+      roles.forEach(function(f, i){
+        if(!f) return;
+        if(fs.indexOf(f) < 0) fs.push(f);
+        var txt = (typed[i] || '').trim();
+        if(txt) lbl[f] = txt;
+      });
+      dt.fields = fs;
+      dt.labels = lbl;
+    }
+    closeColMap();
+    dtAddRows(dt, pc.grid, roles, pc.page);
+    return;
+  }
   if(!roles.some(function(r){ return r === 'pos'; })){ showToast('Assigna una columna a Pos.'); return; }
   lastColRoles = roles.slice();
   // Layout mode: store the manual-wide columns and continue (extraction uses it).
@@ -2528,6 +2739,7 @@ document.addEventListener('keydown', function(e){
   if(els.nameModalOverlay.classList.contains('open')){ cancelNameModal(); return; }
   if(els.menuImportOverlay.classList.contains('open')){ cancelMenuImport(); return; }
   if(els.grupModalOverlay.classList.contains('open')){ els.reviewCancelBtn.click(); return; }
+  if(els.tableDetailOverlay.classList.contains('open')){ closeTableDetail(); return; }
   if(els.conjuntDetailOverlay.classList.contains('open')){ closeConjuntDetail(); return; }
 });
 
@@ -2563,6 +2775,295 @@ function closeGrupReview(){
   els.grupModalOverlay.classList.remove('open');
   state.editingGrup = null;
 }
+
+// ===== Data tables =========================================================
+// A manual carries plenty of tables that belong to the MACHINE and not to any
+// drawing: the recommended-spares list, the electrical BOM, the inspection /
+// cleaning / lubrication plans, the format pieces, the LOTO points. They are
+// all read with the engine that was built for a parts list -- mark the region,
+// detect the columns from the ink profile, say what each column is -- so the
+// only thing a new table needs is a field set of its own. That is all a "kind"
+// is here: a name and a list of fields. Marking, grid detection, the mapping
+// modal, the row editor, the storage and the export are shared.
+var TABLE_FIELD_LABELS = {
+  pos:'Pos.', ref:'Ref.', cant:'Cant.', denominacio:'Denominació', cat:'Categoria',
+  tag:'Etiqueta', fab:'Fabricant', tipus:'Tipus', full:'Full', codi:'Codi',
+  element:'Element', accio:'Acció', freq:'Freqüència', min:'Minuts', mode:'Mode',
+  param:'Paràmetre', valor:'Valor', unitat:'Unitat', ubicacio:'Ubicació',
+  obs:'Observacions'
+};
+// fields:null means the user names the columns himself -- a table the manual
+// only has once isn't worth a field set of its own.
+var TABLE_KINDS = [
+  {v:'spares',     label:'Recanvis recomanats',            fields:['ref','denominacio','cant','cat','obs']},
+  {v:'electrical', label:'Materials elèctrics',            fields:['tag','ref','denominacio','fab','tipus','cant','full']},
+  {v:'maint',      label:'Manteniment (inspecció, neteja, lubricació)', fields:['element','accio','freq','min','mode','obs']},
+  {v:'format',     label:'Peces de format',                fields:['ref','denominacio','cant','valor','obs']},
+  {v:'spec',       label:'Requisits i especificacions',    fields:['param','valor','unitat','obs']},
+  {v:'signals',    label:'Senyals, modes i avisos',        fields:['codi','denominacio','accio','obs']},
+  {v:'loto',       label:'Punts de consignació (LOTO)',    fields:['codi','element','tipus','ubicacio','obs']},
+  {v:'parts',      label:'Llista de peces (Pos. / Ref. / Cant.)', fields:['pos','ref','cant','denominacio','cat']},
+  {v:'free',       label:'Taula lliure (els noms de columna els poso jo)', fields:null}
+];
+function tableKind(v){
+  for(var i=0;i<TABLE_KINDS.length;i++) if(TABLE_KINDS[i].v === v) return TABLE_KINDS[i];
+  return TABLE_KINDS[0];
+}
+function fieldLabel(f){ return TABLE_FIELD_LABELS[f] || f; }
+// A free table's keys are slugs, but the heading the user typed is the one
+// worth showing -- "Nº de full", not "n_de_full" -- so each table keeps its
+// own labels and they travel with the export.
+function dtFieldLabel(t, f){ return (t && t.labels && t.labels[f]) || fieldLabel(f); }
+// A free table's columns are named in words, so they're slugged into keys an
+// app can read: "Nº de full" -> "n_de_full".
+function slugField(s){
+  return (s||'').toString().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,24);
+}
+// The fields a table's rows are keyed by: its kind's set, or -- for a free
+// table -- whatever columns have been named so far.
+function tableFields(t){
+  var k = tableKind(t.kind);
+  return k.fields ? k.fields.slice() : (t.fields||[]).slice();
+}
+// Fills in what a stored or imported table may be missing, so everything from
+// here on can assume the shape (and an import never reuses a foreign id).
+function normalizeTables(list){
+  return (list||[]).map(function(t){
+    t = t || {};
+    return {
+      id: uid(),
+      kind: tableKind(t.kind).v,
+      name: t.name || '',
+      pages: Array.isArray(t.pages) ? t.pages.slice() : [],
+      fields: Array.isArray(t.fields) ? t.fields.slice() : [],
+      labels: (t.labels && typeof t.labels === 'object') ? Object.assign({}, t.labels) : {},
+      colRoles: Array.isArray(t.colRoles) ? t.colRoles.slice() : null,
+      rows: Array.isArray(t.rows) ? t.rows.slice() : []
+    };
+  });
+}
+// Same idea as rowFromCells, but the field names come from the table's kind
+// instead of being the four fixed parts-list ones. A row with nothing in it is
+// dropped: a marked region always catches a stray line or two.
+function rowFromFieldCells(cells, roles, page){
+  var row = {}, any = false;
+  roles.forEach(function(f, c){
+    if(!f) return;
+    var v = (cells[c]||'').trim(); if(!v) return;
+    row[f] = row[f] ? (row[f] + ' ' + v) : v;
+    any = true;
+  });
+  if(!any) return null;
+  row.page = page || null;
+  return row;
+}
+function findTable(id){ return state.tables.find(function(t){ return t.id === id; }); }
+function editingTable(){ return state.editingTable ? findTable(state.editingTable) : null; }
+function renderTablesPanel(){
+  els.tablesPanel.style.display = state.tables.length ? 'block' : 'none';
+  els.tableChipsList.innerHTML = '';
+  state.tables.forEach(function(t){
+    var chip = document.createElement('div');
+    chip.className = 'conjuntChip';
+    var nameEl = document.createElement('div');
+    nameEl.className = 'gName';
+    nameEl.textContent = t.name || tableKind(t.kind).label;
+    var metaEl = document.createElement('div');
+    metaEl.className = 'gMeta';
+    metaEl.textContent = t.rows.length + (t.rows.length===1?' fila':' files') +
+      (t.pages.length ? (' · pàg. ' + pagesToRangeStr(t.pages)) : '');
+    var delBtn = document.createElement('button');
+    delBtn.className = 'gDel'; delBtn.textContent = '✕';
+    delBtn.addEventListener('click', function(e){ e.stopPropagation(); deleteDataTable(t.id); });
+    chip.appendChild(nameEl); chip.appendChild(metaEl); chip.appendChild(delBtn);
+    chip.addEventListener('click', function(){ openTableDetail(t.id); });
+    els.tableChipsList.appendChild(chip);
+  });
+}
+function deleteDataTable(id){
+  var t = findTable(id); if(!t) return;
+  if(t.rows.length && !confirm('Eliminar «' + (t.name || tableKind(t.kind).label) + '» i les seves ' + t.rows.length + ' files?')) return;
+  state.tables = state.tables.filter(function(x){ return x.id !== id; });
+  if(state.editingTable === id) closeTableDetail();
+  persistConjunts();
+  renderTablesPanel();
+}
+els.createTableBtn.addEventListener('click', function(){
+  // The pages checked in the grid are the obvious starting range, but a table
+  // doesn't need any: the page to mark can be typed in its own box.
+  var t = {id:uid(), kind:'spares', name:'',
+           pages:Array.from(state.selected).sort(function(a,b){ return a-b; }),
+           fields:[], labels:{}, colRoles:null, rows:[]};
+  state.tables.push(t);
+  persistConjunts();
+  renderTablesPanel();
+  openTableDetail(t.id);
+});
+// The next page of the table's range that no row has come from yet -- so
+// marking a four-page list is four drags with the page box moving on by itself.
+function dtNextPage(t){
+  var done = {};
+  (t.rows||[]).forEach(function(r){ if(r.page) done[r.page] = 1; });
+  return (t.pages||[]).find(function(p){ return !done[p]; }) || null;
+}
+function dtDefaultPage(t){
+  var nx = dtNextPage(t); if(nx) return nx;
+  var sel = Array.from(state.selected).sort(function(a,b){ return a-b; })[0];
+  return sel || (t.pages||[])[0] || state.portadaPage || (state.numPages ? 1 : null);
+}
+// Whatever is in the page box wins -- it's the one thing the user set by hand.
+function dtPageOf(t){
+  var n = parseInt(els.dtPageInput.value, 10);
+  if(!isNaN(n) && n >= 1 && n <= state.numPages) return n;
+  return dtDefaultPage(t);
+}
+function openTableDetail(id){
+  var t = findTable(id); if(!t) return;
+  state.editingTable = id;
+  els.dtNameInput.value = t.name || '';
+  els.dtKindSelect.innerHTML = TABLE_KINDS.map(function(k){
+    return '<option value="'+k.v+'"'+(k.v===t.kind?' selected':'')+'>'+escHtml(k.label)+'</option>';
+  }).join('');
+  els.dtPagesInput.value = pagesToRangeStr(t.pages);
+  els.dtPageInput.value = dtDefaultPage(t) || '';
+  renderTableDetail();
+  els.tableDetailOverlay.classList.add('open');
+}
+function closeTableDetail(){
+  els.tableDetailOverlay.classList.remove('open');
+  state.editingTable = null;
+  renderTablesPanel();
+}
+function renderTableDetail(){
+  var t = editingTable(); if(!t) return;
+  var fields = tableFields(t);
+  els.dtFieldsInfo.textContent = fields.length
+    ? ('Columnes: ' + fields.map(function(f){ return dtFieldLabel(t, f); }).join(' · '))
+    : 'Encara no hi ha columnes: marca una regió i posa-hi tu els noms.';
+  els.dtRowsWrap.innerHTML = '';
+  if(!t.rows.length){
+    var empty = document.createElement('div');
+    empty.style.cssText = 'font-size:12px; color:var(--muted); padding:8px 0;';
+    empty.textContent = 'Cap fila encara. Posa la pàgina i prem «Marca les files».';
+    els.dtRowsWrap.appendChild(empty);
+    return;
+  }
+  var table = document.createElement('table'); table.className = 'rowsTable';
+  var thead = '<thead><tr>';
+  fields.forEach(function(f){ thead += '<th>' + escHtml(dtFieldLabel(t, f)) + '</th>'; });
+  thead += '<th class="pageCol">Pàg.</th><th class="rmCol"></th></tr></thead>';
+  table.innerHTML = thead;
+  var tbody = document.createElement('tbody');
+  t.rows.forEach(function(row, idx){
+    var tr = document.createElement('tr');
+    fields.forEach(function(f){
+      var td = document.createElement('td'); td.className = 'dtCell dtCell-' + f;
+      var inp = document.createElement('input'); inp.type = 'text'; inp.value = row[f] || '';
+      inp.addEventListener('input', function(){ row[f] = inp.value; });
+      inp.addEventListener('change', function(){ persistConjunts(); });
+      td.appendChild(inp); tr.appendChild(td);
+    });
+    // The page a row came from is what the field app opens on it, so it stays
+    // visible and correctable instead of being buried in the JSON.
+    var tdP = document.createElement('td'); tdP.className = 'pageCol';
+    var inP = document.createElement('input'); inP.type = 'text'; inP.value = row.page || '';
+    inP.addEventListener('change', function(){
+      var n = parseInt(inP.value, 10);
+      row.page = isNaN(n) ? null : n;
+      persistConjunts();
+    });
+    tdP.appendChild(inP); tr.appendChild(tdP);
+    var tdRm = document.createElement('td'); tdRm.className = 'rmCol';
+    var rm = document.createElement('button'); rm.className = 'rmRowBtn'; rm.textContent = '✕';
+    rm.addEventListener('click', function(){ t.rows.splice(idx, 1); persistConjunts(); renderTableDetail(); });
+    tdRm.appendChild(rm); tr.appendChild(tdRm);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  els.dtRowsWrap.appendChild(table);
+}
+// Appends a marked grid's rows to a table and records the page they came from.
+function dtAddRows(t, grid, roles, page){
+  var added = 0;
+  grid.rows.forEach(function(cells){
+    var row = rowFromFieldCells(cells, roles, page);
+    if(row){ t.rows.push(row); added++; }
+  });
+  if(page && t.pages.indexOf(page) < 0){ t.pages.push(page); t.pages.sort(function(a,b){ return a-b; }); }
+  persistConjunts();
+  if(state.editingTable === t.id){
+    els.dtPagesInput.value = pagesToRangeStr(t.pages);
+    var nx = dtNextPage(t);
+    if(nx) els.dtPageInput.value = nx;
+    renderTableDetail();
+  }
+  renderTablesPanel();
+  showToast(added ? (added + (added===1?' fila afegida.':' files afegides.')) : 'Cap fila reconeguda.');
+}
+els.dtNameInput.addEventListener('input', function(){ var t = editingTable(); if(t) t.name = els.dtNameInput.value; });
+els.dtNameInput.addEventListener('change', function(){ persistConjunts(); renderTablesPanel(); });
+els.dtKindSelect.addEventListener('change', function(){
+  var t = editingTable(); if(!t) return;
+  t.kind = els.dtKindSelect.value;
+  // Another kind means other field names, so the column mapping no longer
+  // holds. The rows keep their keys: what the new kind doesn't name stops
+  // being shown rather than being thrown away, and going back shows it again.
+  t.colRoles = null;
+  persistConjunts(); renderTableDetail(); renderTablesPanel();
+});
+els.dtPagesInput.addEventListener('change', function(){
+  var t = editingTable(); if(!t) return;
+  t.pages = rangeStrToPages(els.dtPagesInput.value);
+  els.dtPagesInput.value = pagesToRangeStr(t.pages);
+  els.dtPageInput.value = dtDefaultPage(t) || '';
+  persistConjunts(); renderTablesPanel();
+});
+els.dtUseSelBtn.addEventListener('click', function(){
+  var t = editingTable(); if(!t) return;
+  if(!state.selected.size){ showToast('Selecciona pàgines a la graella primer.'); return; }
+  t.pages = Array.from(state.selected).sort(function(a,b){ return a-b; });
+  els.dtPagesInput.value = pagesToRangeStr(t.pages);
+  els.dtPageInput.value = dtDefaultPage(t) || '';
+  persistConjunts(); renderTablesPanel();
+});
+els.dtPickNameBtn.addEventListener('click', function(){
+  var t = editingTable(); if(!t) return;
+  startPicking(dtPageOf(t), function(text){
+    t.name = stripTitleLabel(text);
+    els.dtNameInput.value = t.name;
+    persistConjunts(); renderTablesPanel();
+  });
+});
+els.dtMarkBtn.addEventListener('click', function(){
+  var t = editingTable(); if(!t) return;
+  startPicking(dtPageOf(t), function(items, page){
+    var grid = itemsToGrid(items);
+    if(!grid.cols.length || !grid.rows.length){ showToast('Cap taula reconeguda en aquesta selecció.'); return; }
+    // Same column count as the last mark on this table -> straight in, so a
+    // list spread over four pages is four drags and no questions.
+    if(t.colRoles && t.colRoles.length === grid.cols.length){ dtAddRows(t, grid, t.colRoles, page); return; }
+    openColMap(grid, page, {table: t});
+  }, 'rows');
+});
+els.dtAddRowBtn.addEventListener('click', function(){
+  var t = editingTable(); if(!t) return;
+  var last = t.rows.length ? t.rows[t.rows.length-1].page : dtPageOf(t);
+  t.rows.push({page: last || null});
+  persistConjunts(); renderTableDetail();
+});
+els.dtClearRowsBtn.addEventListener('click', function(){
+  var t = editingTable(); if(!t || !t.rows.length) return;
+  if(!confirm('Esborrar les ' + t.rows.length + ' files d\'aquesta taula?')) return;
+  t.rows = [];
+  persistConjunts(); renderTableDetail(); renderTablesPanel();
+});
+els.dtDeleteBtn.addEventListener('click', function(){
+  var t = editingTable(); if(t) deleteDataTable(t.id);
+});
+els.dtDoneBtn.addEventListener('click', closeTableDetail);
+els.tableDetailCloseBtn.addEventListener('click', closeTableDetail);
+els.tableDetailOverlay.addEventListener('click', function(e){ if(e.target === els.tableDetailOverlay) closeTableDetail(); });
 
 // -- Export JSON (one file per conjunt) --
 function sanitizeFn(s){ return (s||'').toString().trim().replace(/[\/\\:*?"<>|]/g,'_').replace(/\s+/g,'_'); }
@@ -2626,6 +3127,40 @@ function conjuntPayload(c){
     conjunt: sc
   };
 }
+// A data table travels as its field list plus rows keyed by those fields, so
+// one shape serves every kind and a reader needs no table-by-table knowledge:
+// it reads fields[] and then each row. Only the mapped fields are written out
+// (a row keeps keys from a kind it was read under before), and the ids stay
+// behind -- they're this app's bookkeeping.
+function serializeTable(t){
+  // The editor offers the kind's whole field set, so a column the manual
+  // doesn't print can still be filled in by hand. What travels is narrower:
+  // only the fields something actually ended up in, so a reader drawing a
+  // column per field doesn't draw empty ones.
+  var all = tableFields(t), rows = t.rows || [];
+  var fields = all.filter(function(f){
+    return rows.some(function(r){ return r[f]; });
+  });
+  if(!fields.length) fields = all;
+  var labels = {}, anyLabel = false;
+  fields.forEach(function(f){
+    var l = dtFieldLabel(t, f);
+    if(l !== fieldLabel(f)){ labels[f] = l; anyLabel = true; }
+  });
+  return {
+    kind: t.kind,
+    name: t.name || tableKind(t.kind).label,
+    pages: (t.pages||[]).slice(),
+    fields: fields,
+    labels: anyLabel ? labels : undefined,
+    rows: (t.rows||[]).map(function(r){
+      var o = {};
+      fields.forEach(function(f){ if(r[f]) o[f] = r[f]; });
+      if(r.page != null) o.page = r.page;
+      return o;
+    })
+  };
+}
 // Whole-catalog payload: every conjunt in a single file. importCatalogJson
 // already reads this {conjunts:[…]} shape, so the combined export round-trips.
 function catalogPayload(){
@@ -2634,7 +3169,7 @@ function catalogPayload(){
     pages = allConjuntsPages();
     scs = JSON.parse(JSON.stringify(scs)).map(function(sc){ return remapSerialized(sc, pages); });
   }
-  return {
+  var out = {
     exportedAt: new Date().toISOString(),
     sourceFile: pages ? (combinedPdfFileName()) : (state.fileName + '.pdf'),
     pagesRenumbered: !!pages,
@@ -2642,6 +3177,12 @@ function catalogPayload(){
     portadaPage: pages ? null : state.portadaPage,
     conjunts: scs
   };
+  // Data tables sit on pages no conjunt covers -- the spares list, the
+  // electrical BOM -- so a renumbered PDF doesn't contain them and there is no
+  // numbering to move them onto. They only travel with the whole manual, which
+  // is why the export button says so before writing a renumbered file.
+  if(!pages && state.tables.length) out.tables = state.tables.map(serializeTable);
+  return out;
 }
 // Named after whatever PDF it pairs with: the source manual (…/Foo.pdf →
 // Foo.json), or the exported extract when the pages have been renumbered.
@@ -2806,10 +3347,17 @@ els.exportConjuntBtn.addEventListener('click', function(){
   showToast('Exportat: ' + conjuntFileName(c, idx));
 });
 els.exportCombinedBtn.addEventListener('click', function(){
-  if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
+  var nC = state.conjunts.length, nT = state.tables.length;
+  if(!nC && !nT){ showToast('No hi ha cap conjunt ni cap taula.'); return; }
+  if(remapOn() && nT && !confirm('Les ' + nT + (nT===1?' taula de dades viu':' taules de dades viuen') +
+      ' a pàgines que no són de cap conjunt, i per tant no són al PDF renumerat: quedarà fora del JSON.\n\n' +
+      'Per pujar-les al field app, desmarca la renumeració i fes servir el manual sencer com a PDF.\n\nExporto igualment?')) return;
   var fn = catalogFileName();
   downloadJson(catalogPayload(), fn);
-  showToast('Exportat: ' + fn + ' (' + state.conjunts.length + (state.conjunts.length===1?' conjunt)':' conjunts)'));
+  var parts = [];
+  if(nC) parts.push(nC + (nC===1?' conjunt':' conjunts'));
+  if(nT && !remapOn()) parts.push(nT + (nT===1?' taula':' taules'));
+  showToast('Exportat: ' + fn + ' (' + parts.join(' i ') + ')');
 });
 els.exportCatalogBtn.addEventListener('click', function(){
   if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
@@ -2871,6 +3419,8 @@ function importCatalogJson(data){
   var list = data && data.conjunt ? [data.conjunt]
     : (data && Array.isArray(data.conjunts) ? data.conjunts
     : (Array.isArray(data) ? data : null));
+  // A JSON may carry only data tables (no conjunt at all) and still be valid.
+  if(!list && data && Array.isArray(data.tables)) list = [];
   if(!list){ showToast('El JSON no sembla un catàleg vàlid.'); return; }
   normalizeConjunts(list); // migrate legacy flat-rows shape; ensure subgrups + num
   list.forEach(function(c){
@@ -2882,10 +3432,19 @@ function importCatalogJson(data){
     ['serial','model','client'].forEach(function(k){ if(!state.machine[k] && data.machine[k]) state.machine[k] = data.machine[k]; });
   }
   if(!state.portadaPage && data && data.portadaPage) state.portadaPage = data.portadaPage;
+  var nT = 0;
+  if(data && Array.isArray(data.tables) && data.tables.length){
+    normalizeTables(data.tables).forEach(function(t){ state.tables.push(t); });
+    nT = data.tables.length;
+  }
   persistConjunts();
   renderMachinePanel();
   renderConjuntsPanel();
-  showToast(list.length + (list.length===1 ? ' conjunt importat.' : ' conjunts importats.'));
+  renderTablesPanel();
+  var parts = [];
+  if(list.length) parts.push(list.length + (list.length===1 ? ' conjunt' : ' conjunts'));
+  if(nT) parts.push(nT + (nT===1 ? ' taula' : ' taules'));
+  showToast(parts.length ? (parts.join(' i ') + ' importats.') : 'El JSON no portava res per importar.');
 }
 els.importJsonBtn.addEventListener('click', function(){ els.importJsonInput.click(); });
 els.importJsonInput.addEventListener('change', function(e){
