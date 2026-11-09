@@ -334,8 +334,8 @@
     <button id="exportCombinedPdfBtn">Exporta tots (un sol PDF)</button>
     <button id="exportCatalogBtn">Exporta tots (un JSON per conjunt)</button>
     <button id="exportCatalogPdfBtn">Exporta tots (un PDF per conjunt)</button>
-    <label id="remapLbl" title="Marca-ho si vols pujar la parella PDF+JSON al field app: el JSON es renumera perquè les pàgines quadrin amb el PDF exportat. Desmarcat, el JSON manté la numeració del manual original.">
-      <input type="checkbox" id="remapPagesChk"> Renumera els JSON per quadrar amb el PDF exportat
+    <label id="remapLbl" title="Marcat: el PDF exportat porta només les pàgines que el JSON fa servir (dibuixos, taules, esquemes, pàgines marcades, inicis de secció) i el JSON es renumera perquè hi quadri: una parella més petita per al field app. Desmarcat: el JSON manté la numeració del manual i la parella és el manual sencer.">
+      <input type="checkbox" id="remapPagesChk"> Retalla el PDF i renumera el JSON perquè quadrin
     </label>
   </div>
   <div id="conjuntChipsList"></div>
@@ -4307,6 +4307,26 @@ function allConjuntsPages(){
   state.conjunts.forEach(function(c){ conjuntPages(c).forEach(function(p){ set[p] = 1; }); });
   return Object.keys(set).map(Number).sort(function(a,b){ return a-b; });
 }
+// Every page the exported JSON points at: the conjunts' sheets, the data
+// tables' pages, the marked pages, the schematic sheets, where each section
+// starts, and the cover. A cut-down PDF has to carry all of them, or the JSON
+// would point at pages that aren't there.
+function allExportPages(){
+  var set = {};
+  allConjuntsPages().forEach(function(p){ set[p] = 1; });
+  state.tables.forEach(function(t){
+    (t.pages||[]).forEach(function(p){ set[p] = 1; });
+    (t.rows||[]).forEach(function(r){ if(r.page) set[r.page] = 1; });
+  });
+  state.refs.forEach(function(r){ if(r.page) set[r.page] = 1; });
+  state.sheets.forEach(function(x){ if(x.page) set[x.page] = 1; });
+  state.sections.forEach(function(x){ if(x.page) set[x.page] = 1; });
+  if(state.portadaPage) set[state.portadaPage] = 1;
+  return Object.keys(set).map(Number).filter(function(p){ return p >= 1 && (!state.numPages || p <= state.numPages); }).sort(function(a,b){ return a-b; });
+}
+function hasExportContent(){
+  return !!(state.conjunts.length || state.tables.length || state.refs.length || state.sheets.length || state.sections.length);
+}
 // An exported PDF always renumbers from 1, so a JSON meant to pair with it must
 // have its page numbers moved onto that PDF's numbering (125,126,127 -> 1,2,3).
 // Mutates the passed (already cloned) payload.
@@ -4376,34 +4396,34 @@ function serializeTable(t){
 // Whole-catalog payload: every conjunt in a single file. importCatalogJson
 // already reads this {conjunts:[…]} shape, so the combined export round-trips.
 function catalogPayload(){
-  var scs = state.conjunts.map(serializeConjunt), pages = null;
+  var scs = state.conjunts.map(serializeConjunt), pages = null, map = null;
   if(remapOn()){
-    pages = allConjuntsPages();
+    pages = allExportPages();
+    map = {}; pages.forEach(function(p, i){ map[p] = i + 1; });
     scs = JSON.parse(JSON.stringify(scs)).map(function(sc){ return remapSerialized(sc, pages); });
   }
+  function pg(p){ return (p == null) ? p : (map ? (map[p] || null) : p); }
   var out = {
     exportedAt: new Date().toISOString(),
     sourceFile: pages ? (combinedPdfFileName()) : (state.fileName + '.pdf'),
     pagesRenumbered: !!pages,
     machine: state.machine,
-    portadaPage: pages ? null : state.portadaPage,
+    portadaPage: pg(state.portadaPage) || null,
     conjunts: scs
   };
-  // Data tables and marked pages sit on pages no conjunt covers -- the spares
-  // list, the electrical BOM, the consignation diagram -- so a renumbered PDF
-  // doesn't contain them and there is no numbering to move them onto. They
-  // only travel with the whole manual, which is why the export button says so
-  // before writing a renumbered file.
-  if(!pages && state.tables.length) out.tables = state.tables.map(serializeTable);
-  if(!pages && state.refs.length){
-    out.refs = state.refs.map(function(r){ return {kind:r.kind, page:r.page, label:refTitle(r)}; });
-  }
-  if(!pages && state.sheets.length){
-    out.sheets = state.sheets.map(function(x){ return {sheet:x.sheet, page:x.page}; });
-  }
-  if(!pages && state.sections.length){
-    out.sections = state.sections.map(function(x){ return {num:x.num, title:x.title, page:x.page}; });
-  }
+  // Everything the reading found travels with the conjunts, whichever PDF the
+  // pair is built on: the whole manual, or the cut-down one -- which carries
+  // every page the JSON points at (allExportPages), so each number here is
+  // moved onto it the same way the conjunts' are.
+  if(state.tables.length) out.tables = state.tables.map(function(t){
+    var st = serializeTable(t);
+    st.pages = st.pages.map(pg).filter(Boolean);
+    st.rows.forEach(function(r){ if(r.page != null) r.page = pg(r.page); });
+    return st;
+  });
+  if(state.refs.length) out.refs = state.refs.map(function(r){ return {kind:r.kind, page:pg(r.page), label:refTitle(r)}; });
+  if(state.sheets.length) out.sheets = state.sheets.map(function(x){ return {sheet:x.sheet, page:pg(x.page)}; });
+  if(state.sections.length) out.sections = state.sections.map(function(x){ return {num:x.num, title:x.title, page:pg(x.page)}; });
   return out;
 }
 // Named after whatever PDF it pairs with: the source manual (…/Foo.pdf →
@@ -4569,25 +4589,17 @@ els.exportConjuntBtn.addEventListener('click', function(){
   showToast('Exportat: ' + conjuntFileName(c, idx));
 });
 els.exportCombinedBtn.addEventListener('click', function(){
-  var nC = state.conjunts.length, nT = state.tables.length, nR = state.refs.length, nS = state.sheets.length;
-  if(!nC && !nT && !nR && !nS){ showToast('No hi ha res per exportar.'); return; }
-  if(remapOn() && (nT || nR || nS)){
-    var what = [];
-    if(nT) what.push(nT + (nT===1?' taula de dades':' taules de dades'));
-    if(nR) what.push(nR + (nR===1?' pàgina marcada':' pàgines marcades'));
-    if(nS) what.push('el mapa de ' + nS + ' fulls d\'esquema');
-    if(!confirm(what.join(' i ') + ' són a pàgines que no són de cap conjunt, i per tant no són al ' +
-        'PDF renumerat: quedaran fora del JSON.\n\nPer pujar-les al field app, desmarca la renumeració i ' +
-        'fes servir el manual sencer com a PDF.\n\nExporto igualment?')) return;
-  }
+  var nC = state.conjunts.length, nT = state.tables.length, nR = state.refs.length, nS = state.sheets.length, nX = state.sections.length;
+  if(!hasExportContent()){ showToast('No hi ha res per exportar.'); return; }
   var fn = catalogFileName();
   downloadJson(catalogPayload(), fn);
   var parts = [];
   if(nC) parts.push(nC + (nC===1?' conjunt':' conjunts'));
-  if(nT && !remapOn()) parts.push(nT + (nT===1?' taula':' taules'));
-  if(nR && !remapOn()) parts.push(nR + (nR===1?' pàgina':' pàgines'));
-  if(nS && !remapOn()) parts.push(nS + ' fulls');
-  showToast('Exportat: ' + fn + ' (' + parts.join(', ') + ')');
+  if(nT) parts.push(nT + (nT===1?' taula':' taules'));
+  if(nR) parts.push(nR + (nR===1?' pàgina marcada':' pàgines marcades'));
+  if(nS) parts.push(nS + ' fulls');
+  if(nX) parts.push(nX + ' seccions');
+  showToast('Exportat: ' + fn + ' (' + parts.join(', ') + ')' + (remapOn() ? ' · renumerat sobre les ' + allExportPages().length + ' pàgines del PDF retallat' : ''), 5000);
 });
 els.exportCatalogBtn.addEventListener('click', function(){
   if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
@@ -4609,9 +4621,9 @@ els.exportConjuntPdfBtn.addEventListener('click', function(){
   }).then(function(){ btn.disabled = false; btn.textContent = lbl; });
 });
 els.exportCombinedPdfBtn.addEventListener('click', function(){
-  if(!state.conjunts.length){ showToast('No hi ha cap conjunt creat.'); return; }
-  var pages = allConjuntsPages();
-  if(!pages.length){ showToast('Els conjunts no tenen cap pàgina assignada.'); return; }
+  if(!hasExportContent()){ showToast('No hi ha res per exportar.'); return; }
+  var pages = allExportPages();
+  if(!pages.length){ showToast('Res del catàleg no té cap pàgina assignada.'); return; }
   var btn = els.exportCombinedPdfBtn, lbl = btn.textContent;
   btn.disabled = true; btn.textContent = 'Generant PDF…';
   buildPdfFromPages(pages).then(function(res){
