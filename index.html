@@ -308,7 +308,7 @@
   <button id="createConjuntBtn">Crea un conjunt</button>
   <button id="createTableBtn">Crea una taula de dades</button>
   <button id="scanSheetsBtn" title="Llegeix el número de full del caixetí de cada pàgina seleccionada i en fa el mapa full → pàgina">Llegeix els núms. de full</button>
-  <button id="readManualBtn" class="primary" title="Escaneja el manual sencer: índex de seccions, fitxa de màquina, recanvis recomanats, llista elèctrica, matriu de manteniment, pàgines clau i mapa de fulls">⚡ Llegeix el manual</button>
+  <button id="readManualBtn" class="primary" title="Escaneja el manual sencer: índex, fitxa de màquina, dibuixos, recanvis, llista elèctrica, matriu, pàgines clau i fulls. Tornar-hi refà el que va llegir; el que has fet a mà no es toca">⚡ Llegeix el manual</button>
   <button id="newFileBtn">Obre un altre PDF</button>
 </header>
 
@@ -3061,7 +3061,8 @@ function normalizeTables(list){
       fields: Array.isArray(t.fields) ? t.fields.slice() : [],
       labels: (t.labels && typeof t.labels === 'object') ? Object.assign({}, t.labels) : {},
       colRoles: Array.isArray(t.colRoles) ? t.colRoles.slice() : null,
-      rows: Array.isArray(t.rows) ? t.rows.slice() : []
+      rows: Array.isArray(t.rows) ? t.rows.slice() : [],
+      auto: !!t.auto
     };
   });
 }
@@ -3701,6 +3702,10 @@ function rmCollectPage(page){
 function readManual(){
   if(!state.pdfDoc) return;
   var btn = els.readManualBtn, lbl = btn.textContent; btn.disabled = true;
+  state.tables = state.tables.filter(function(t){ return !t.auto; });
+  state.conjunts = state.conjunts.filter(function(c){ return !c.auto; });
+  state.refs = state.refs.filter(function(r){ return !r.auto; });
+  state.sheets = state.sheets.filter(function(x){ return !x.auto; });
   var N = state.numPages, infos = [];
   var report = {sections:0, machine:0, spares:0, electrical:0, matrix:0, refs:0, sheets:0};
   var chain = Promise.resolve();
@@ -3811,7 +3816,7 @@ function readManual(){
      [/UNPACKING AND INSTALLATION|INSTALACI/i, 'procedure']].forEach(function(pair){
       var sec = state.sections.filter(function(x){ return pair[0].test(x.title); })[0];
       if(!sec || refOnPage(sec.page)) return;
-      state.refs.push({id:uid(), kind:pair[1], page:sec.page, label:sec.num + ' ' + sec.title});
+      state.refs.push({id:uid(), kind:pair[1], page:sec.page, label:sec.num + ' ' + sec.title, auto:true});
       report.refs++;
     });
     state.refs.sort(byRefPage);
@@ -3825,7 +3830,7 @@ function readManual(){
           if(sheet){
             sheetPages.push(info.page);
             if(!state.sheets.some(function(x){ return x.page === info.page; }) && !state.sheets.some(function(x){ return x.sheet === sheet; })){
-              state.sheets.push({sheet:sheet, page:info.page}); report.sheets++;
+              state.sheets.push({sheet:sheet, page:info.page, auto:true}); report.sheets++;
             }
           }
           var labels = rmBomRoles(info.items);
@@ -3980,7 +3985,7 @@ function normalizeSheets(list){
   return (list||[]).map(function(x){
     x = x || {};
     var p = parseInt(x.page, 10), t = sheetTokenOf(x.sheet);
-    return (t && !isNaN(p)) ? {sheet:t, page:p} : null;
+    return (t && !isNaN(p)) ? {sheet:t, page:p, auto: !!x.auto} : null;
   }).filter(function(x){ if(!x || seen[x.page]) return false; seen[x.page] = 1; return true; })
     .sort(function(a,b){ return a.page - b.page; });
 }
@@ -4074,7 +4079,7 @@ function normalizeRefs(list){
   return (list||[]).map(function(r){
     r = r || {};
     var p = parseInt(r.page, 10);
-    return { id: uid(), kind: refKind(r.kind).v, page: isNaN(p) ? null : p, label: r.label || '' };
+    return { id: uid(), kind: refKind(r.kind).v, page: isNaN(p) ? null : p, label: r.label || '', auto: !!r.auto };
   }).filter(function(r){ return r.page; }).sort(byRefPage);
 }
 function byRefPage(a, b){ return (a.page||0) - (b.page||0); }
