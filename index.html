@@ -3835,6 +3835,17 @@ function readManual(){
           var hdrV = labels.reduce(function(a, L){ return a + uvOf(L.it).v; }, 0) / labels.length;
           var bodyItems = info.items.filter(function(it){ return it.rot === labels[0].it.rot && uvOf(it).v > hdrV + 3; });
           if(!bodyItems.length) return;
+          // The rows run on at one pitch from the labels' line; the title
+          // block further down the sheet is text too, and in the same axes,
+          // but a jump of several rows separates it. The list ends there.
+          var vs = {}; bodyItems.forEach(function(it){ vs[Math.round(uvOf(it).v)] = 1; });
+          var vk = Object.keys(vs).map(Number).sort(function(a,b){ return a-b; }), gaps = [];
+          for(var g=1; g<vk.length; g++) gaps.push(vk[g]-vk[g-1]);
+          var sortedGaps = gaps.slice().sort(function(a,b){ return a-b; });
+          var pitchV = sortedGaps.length ? sortedGaps[Math.floor(sortedGaps.length/2)] : 8;
+          var cutV = Infinity;
+          for(var g2=0; g2<gaps.length; g2++){ if(gaps[g2] > pitchV*3 + 2){ cutV = vk[g2] + pitchV/2; break; } }
+          bodyItems = bodyItems.filter(function(it){ return uvOf(it).v < cutV; });
           var gridE = itemsToGrid(bodyItems);
           // name the columns by the label whose along-position they share
           var rolesE = gridE.cols.map(function(x){
@@ -3845,7 +3856,7 @@ function readManual(){
           var rowsE = [];
           gridE.rows.forEach(function(cells){
             var row = rowFromFieldCells(cells, rolesE, info.page);
-            if(row && row.tag && (row.ref || row.denominacio) && !/^(Device tag|Page|Part number)$/i.test(row.ref||'')) rowsE.push(row);
+            if(row && row.tag && /\d/.test(row.tag) && (row.ref || row.denominacio) && !/^(Device tag|Page|Part number)$/i.test(row.ref||'')) rowsE.push(row);
           });
           if(!rowsE.length) return;
           if(!tE){
@@ -3861,8 +3872,43 @@ function readManual(){
     return chain2.then(function(){
       state.sheets.sort(function(a,b){ return a.page - b.page; });
       report.electrical = bomRows;
+    }).then(function(){
+      // 7. the mechanical drawings. A drawing sheet is one that carries its
+      // own parts list -- the title block and the printed POS./CANT. header
+      // give it away -- and the app has read those sheets by hand since the
+      // start: name and number from the title block, rows from the header.
+      // Here every such sheet of the annex is read, one drawing per sheet,
+      // and they're hung from one conjunt so the field app gets the shape it
+      // expects; the names are what a technician looks for, so each drawing
+      // is its own grup and the picker lists them all.
+      var covered = {};
+      state.conjunts.forEach(function(c){ conjuntPages(c).forEach(function(p){ covered[p] = 1; }); });
+      var cand = infos.filter(function(info){ return !info.body && !covered[info.page]; });
+      var drawPages = [];
+      var chain3 = Promise.resolve();
+      cand.forEach(function(info){
+        chain3 = chain3.then(function(){
+          return prodecTitleBlock(info.page).then(function(tb){ if(tb && (tb.name || tb.num)) drawPages.push(info.page); });
+        });
+      });
+      return chain3.then(function(){
+        if(!drawPages.length) return;
+        drawPages.sort(function(a,b){ return a-b; });
+        return buildSubgrupsForPages(drawPages).then(function(subs){
+          subs = subs.filter(function(sg){ return sg.rows.length || sg.name; });
+          if(!subs.length) return;
+          var secTitle = (state.sections.filter(function(x){ return /MECHANICAL DRAWINGS|PLANOS MEC|DIBUIXOS/i.test(x.title); })[0] || {}).title;
+          var c = {id:uid(), name: secTitle || 'Dibuixos mecànics', num: state.machine.project || '', auto:true, grups: subs.map(function(sg){
+            return {id:uid(), name: sg.name || ('Full ' + (sg.pages[0]||'')), pages: sg.pages.slice(), subgrups:[sg]};
+          })};
+          state.conjunts.push(c);
+          report.drawings = subs.length;
+          report.drawingRows = subs.reduce(function(a, sg){ return a + sg.rows.length; }, 0);
+        });
+      });
+    }).then(function(){
       persistConjunts();
-      renderMachinePanel(); renderSectionsPanel(); renderTablesPanel(); renderRefsPanel(); renderSheetsPanel();
+      renderMachinePanel(); renderSectionsPanel(); renderConjuntsPanel(); renderTablesPanel(); renderRefsPanel(); renderSheetsPanel();
       btn.disabled = false; btn.textContent = lbl;
       var parts = [];
       parts.push(report.sections + ' seccions');
@@ -3870,6 +3916,7 @@ function readManual(){
       if(report.spares) parts.push(report.spares + ' recanvis');
       if(report.electrical) parts.push(report.electrical + ' materials elèctrics');
       if(report.matrix) parts.push('matriu de ' + report.matrix + ' components');
+      if(report.drawings) parts.push(report.drawings + ' dibuixos amb ' + report.drawingRows + ' posicions');
       if(report.refs) parts.push(report.refs + ' pàgines marcades');
       if(report.sheets) parts.push(report.sheets + ' fulls');
       var msg = 'Manual llegit: ' + parts.join(' · ') + '. Tot es pot revisar i corregir als panells.';
