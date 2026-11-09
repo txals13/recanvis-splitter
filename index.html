@@ -3925,10 +3925,13 @@ function readManual(){
       // own parts list -- the title block and the printed POS./CANT. header
       // give it away -- and the app has read those sheets by hand since the
       // start: name and number from the title block, rows from the header.
-      // Here every such sheet of the annex is read, one drawing per sheet,
-      // and they're hung from one conjunt so the field app gets the shape it
-      // expects; the names are what a technician looks for, so each drawing
-      // is its own grup and the picker lists them all.
+      // Here every such sheet of the annex is read, and EACH DRAWING IS ITS
+      // OWN CONJUNT, with one grup and one dibuix under it. The field app
+      // hangs things off the conjunt: its number is what the Tag field
+      // offers, and "the whole conjunt" is what a technician orders when a
+      // drawing goes as one line. One conjunt for the whole annex, tried
+      // first, gave a single tag -- the machine -- and the machine is not a
+      // conjunt.
       var covered = {};
       state.conjunts.forEach(function(c){ conjuntPages(c).forEach(function(p){ covered[p] = 1; }); });
       var cand = infos.filter(function(info){ return !info.body && !covered[info.page]; });
@@ -3945,11 +3948,11 @@ function readManual(){
         return buildSubgrupsForPages(drawPages).then(function(subs){
           subs = subs.filter(function(sg){ return sg.rows.length || sg.name; });
           if(!subs.length) return;
-          var secTitle = (state.sections.filter(function(x){ return /MECHANICAL DRAWINGS|PLANOS MEC|DIBUIXOS/i.test(x.title); })[0] || {}).title;
-          var c = {id:uid(), name: secTitle || 'Dibuixos mecànics', num: state.machine.project || '', auto:true, grups: subs.map(function(sg){
-            return {id:uid(), name: sg.name || ('Full ' + (sg.pages[0]||'')), pages: sg.pages.slice(), subgrups:[sg]};
-          })};
-          state.conjunts.push(c);
+          subs.forEach(function(sg){
+            var name = sg.name || ('Full ' + (sg.pages[0]||''));
+            state.conjunts.push({id:uid(), name:name, num: sg.num || '', auto:true,
+              grups:[{id:uid(), name:name, pages: sg.pages.slice(), subgrups:[sg]}]});
+          });
           report.drawings = subs.length;
           report.drawingRows = subs.reduce(function(a, sg){ return a + sg.rows.length; }, 0);
         });
