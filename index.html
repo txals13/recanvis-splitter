@@ -323,6 +323,7 @@
   <span id="colsInfo" style="font-size:12px; color:var(--muted);">Columnes: —</span>
   <button id="redefineColsBtn" title="Marca una taula de mostra per (re)definir l'ordre de columnes del manual">Defineix columnes</button>
   <button id="importJsonBtn" title="Importa un conjunt d'un fitxer JSON exportat">⬆ Importa (JSON)</button>
+  <button id="recoverBtn" style="display:none;" title="Torna a posar el que hi havia l'última vegada que vas treballar amb aquest manual">↩ Recupera l'última sessió</button>
   <input type="file" id="importJsonInput" accept="application/json,.json" style="display:none;">
 </div>
 
@@ -647,6 +648,7 @@ var els = {
   colsInfo: document.getElementById('colsInfo'),
   redefineColsBtn: document.getElementById('redefineColsBtn'),
   importJsonBtn: document.getElementById('importJsonBtn'),
+  recoverBtn: document.getElementById('recoverBtn'),
   importJsonInput: document.getElementById('importJsonInput'),
   modalPortadaBtn: document.getElementById('modalPortadaBtn'),
   conjuntsPanel: document.getElementById('conjuntsPanel'),
@@ -814,6 +816,7 @@ function resetApp(){
   state.tables = []; state.editingTable = null;
   state.refs = []; state.editingRef = null;
   state.sheets = []; state.sections = [];
+  state.prevCatalog = null; els.recoverBtn.style.display = 'none';
   if(muDoc != null && muMod){ try{ muMod.freeDocument(muDoc); }catch(e){} }
   muDoc = null; muDocFor = null; // the wasm module itself is kept for the session
   els.grid.innerHTML = '';
@@ -864,16 +867,22 @@ function loadPdf(bytesForPdfjs){
     els.fileInfo.textContent = state.fileName + '.pdf — ' + state.numPages + ' pàgines';
     setStatus('');
     updateSelCount();
-    var cat = loadCatalogForFile(state.fileName);
-    state.machine = cat.machine;
-    state.portadaPage = cat.portadaPage;
-    state.specPage = cat.specPage;
-    state.colLayout = cat.colLayout;
-    state.conjunts = cat.conjunts;
-    state.tables = cat.tables;
-    state.refs = cat.refs;
-    state.sheets = cat.sheets;
-    state.sections = cat.sections;
+    // A manual opens clean. What was done with it last time isn't thrown
+    // away -- it's set aside and offered back with one button -- but it
+    // doesn't come up on its own: every open starts from the page, and the
+    // reading is a click away.
+    var prev = loadCatalogForFile(state.fileName);
+    applyCatalog(emptyCatalog());
+    state.prevCatalog = null;
+    els.recoverBtn.style.display = 'none';
+    if(catalogHasContent(prev)){
+      var all = loadAllCatalogs();
+      all[state.fileName + '::prev'] = all[state.fileName];
+      localStorage.setItem(CATALOG_LS_KEY, JSON.stringify(all));
+      state.prevCatalog = prev;
+      els.recoverBtn.textContent = '↩ Recupera l\'última sessió (' + catalogSummary(prev) + ')';
+      els.recoverBtn.style.display = 'inline-block';
+    }
     renderMachinePanel();
     renderSectionsPanel();
     renderConjuntsPanel();
@@ -1459,6 +1468,40 @@ function normalizeConjunts(conjunts){
 function grupRowCount(g){
   return (g.subgrups||[]).reduce(function(sum,sg){ return sum + sg.rows.length; }, 0);
 }
+function emptyCatalog(){
+  return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:[], tables:[], refs:[], sheets:[], sections:[] };
+}
+function applyCatalog(cat){
+  state.machine = cat.machine; state.portadaPage = cat.portadaPage; state.specPage = cat.specPage;
+  state.colLayout = cat.colLayout; state.conjunts = cat.conjunts; state.tables = cat.tables;
+  state.refs = cat.refs; state.sheets = cat.sheets; state.sections = cat.sections;
+}
+function catalogHasContent(cat){
+  if(!cat) return false;
+  if(cat.conjunts.length || cat.tables.length || cat.refs.length || cat.sheets.length || cat.sections.length) return true;
+  if(cat.portadaPage || cat.colLayout) return true;
+  return MACHINE_FIELDS.some(function(f){ return (cat.machine[f.k]||'').toString().trim(); });
+}
+function catalogSummary(cat){
+  var parts = [];
+  if(cat.conjunts.length) parts.push(cat.conjunts.length + (cat.conjunts.length===1?' conjunt':' conjunts'));
+  if(cat.tables.length) parts.push(cat.tables.length + (cat.tables.length===1?' taula':' taules'));
+  if(cat.refs.length) parts.push(cat.refs.length + (cat.refs.length===1?' pàgina':' pàgines'));
+  if(cat.sheets.length) parts.push(cat.sheets.length + ' fulls');
+  if(cat.sections.length) parts.push(cat.sections.length + ' seccions');
+  var m = MACHINE_FIELDS.filter(function(f){ return (cat.machine[f.k]||'').toString().trim(); }).length;
+  if(m) parts.push(m + ' camps de màquina');
+  return parts.join(', ') || 'buida';
+}
+els.recoverBtn.addEventListener('click', function(){
+  var prev = state.prevCatalog; if(!prev) return;
+  applyCatalog(prev);
+  state.prevCatalog = null;
+  els.recoverBtn.style.display = 'none';
+  persistConjunts();
+  renderMachinePanel(); renderSectionsPanel(); renderConjuntsPanel(); renderTablesPanel(); renderRefsPanel(); renderSheetsPanel();
+  showToast('Sessió recuperada.');
+});
 function persistConjunts(){
   var all = loadAllCatalogs();
   all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, specPage: state.specPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables, refs: state.refs, sheets: state.sheets, sections: state.sections };
