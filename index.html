@@ -158,6 +158,15 @@
   #refChipsList{display:flex; flex-wrap:wrap; gap:10px;}
   #refModalCard{width:min(620px,94vw);}
   #machineCardCard{width:min(760px,94vw);}
+  #sectionsPanel{
+    display:none; border-bottom:1px solid var(--border); padding:12px 16px;
+    background:var(--panel);
+  }
+  #sectionsPanelHeader{display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;}
+  #sectionsPanelHeader strong{font-size:13px; margin-right:4px;}
+  #sectionsSummary{font-size:12px; color:var(--muted);}
+  #sectionsList{max-height:140px; overflow:auto;}
+  #readManualBtn.primary{font-weight:600;}
   #sheetsPanel{
     display:none; border-bottom:1px solid var(--border); padding:12px 16px;
     background:var(--panel);
@@ -299,6 +308,7 @@
   <button id="createConjuntBtn">Crea un conjunt</button>
   <button id="createTableBtn">Crea una taula de dades</button>
   <button id="scanSheetsBtn" title="Llegeix el número de full del caixetí de cada pàgina seleccionada i en fa el mapa full → pàgina">Llegeix els núms. de full</button>
+  <button id="readManualBtn" class="primary" title="Escaneja el manual sencer: índex de seccions, fitxa de màquina, recanvis recomanats, llista elèctrica, matriu de manteniment, pàgines clau i mapa de fulls">⚡ Llegeix el manual</button>
   <button id="newFileBtn">Obre un altre PDF</button>
 </header>
 
@@ -344,6 +354,14 @@
     <span style="font-size:12px; color:var(--muted);">el que no és text sinó imatge: on és cada cosa, on comença cada secció</span>
   </div>
   <div id="refChipsList"></div>
+</div>
+
+<div id="sectionsPanel">
+  <div id="sectionsPanelHeader">
+    <strong>Índex del manual</strong>
+    <span id="sectionsSummary"></span>
+  </div>
+  <div id="sectionsList"></div>
 </div>
 
 <div id="sheetsPanel">
@@ -722,7 +740,11 @@ var els = {
   sheetsPanel: document.getElementById('sheetsPanel'),
   sheetsSummary: document.getElementById('sheetsSummary'),
   sheetsList: document.getElementById('sheetsList'),
-  sheetsClearBtn: document.getElementById('sheetsClearBtn')
+  sheetsClearBtn: document.getElementById('sheetsClearBtn'),
+  readManualBtn: document.getElementById('readManualBtn'),
+  sectionsPanel: document.getElementById('sectionsPanel'),
+  sectionsSummary: document.getElementById('sectionsSummary'),
+  sectionsList: document.getElementById('sectionsList')
 };
 
 var state = {
@@ -751,7 +773,8 @@ var state = {
   editingTable: null,  // id of the data table open in its detail view
   refs: [],            // marked pages: what is only an image, pointed at
   editingRef: null,    // id of the marked page open in its editor
-  sheets: []           // schematic sheet number -> page, read off the title blocks
+  sheets: [],          // schematic sheet number -> page, read off the title blocks
+  sections: []         // the manual's own index: numbered heading -> first page
 };
 
 function showToast(msg, ms){
@@ -790,7 +813,7 @@ function resetApp(){
   state.machine = emptyMachine(); state.portadaPage = null; state.specPage = null; state.colLayout = null;
   state.tables = []; state.editingTable = null;
   state.refs = []; state.editingRef = null;
-  state.sheets = [];
+  state.sheets = []; state.sections = [];
   if(muDoc != null && muMod){ try{ muMod.freeDocument(muDoc); }catch(e){} }
   muDoc = null; muDocFor = null; // the wasm module itself is kept for the session
   els.grid.innerHTML = '';
@@ -805,6 +828,8 @@ function resetApp(){
   els.refChipsList.innerHTML = '';
   els.sheetsPanel.style.display = 'none';
   els.sheetsList.innerHTML = '';
+  els.sectionsPanel.style.display = 'none';
+  els.sectionsList.innerHTML = '';
   els.dropzone.style.display = 'block';
   els.fileInput.value = '';
   setStatus('');
@@ -848,7 +873,9 @@ function loadPdf(bytesForPdfjs){
     state.tables = cat.tables;
     state.refs = cat.refs;
     state.sheets = cat.sheets;
+    state.sections = cat.sections;
     renderMachinePanel();
+    renderSectionsPanel();
     renderConjuntsPanel();
     renderTablesPanel();
     renderRefsPanel();
@@ -1378,8 +1405,8 @@ function machineFilledCount(){
 // held just the bare conjunts array — migrate those on read.
 function loadCatalogForFile(fileName){
   var raw = loadAllCatalogs()[fileName];
-  if(!raw) return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:[], tables:[], refs:[], sheets:[] };
-  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:normalizeConjunts(raw), tables:[], refs:[], sheets:[] };
+  if(!raw) return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:[], tables:[], refs:[], sheets:[], sections:[] };
+  if(Array.isArray(raw)) return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:normalizeConjunts(raw), tables:[], refs:[], sheets:[], sections:[] };
   return {
     machine: Object.assign(emptyMachine(), raw.machine || {}),
     portadaPage: raw.portadaPage || null,
@@ -1388,7 +1415,8 @@ function loadCatalogForFile(fileName){
     conjunts: normalizeConjunts(raw.conjunts || []),
     tables: normalizeTables(raw.tables || []),
     refs: normalizeRefs(raw.refs || []),
-    sheets: normalizeSheets(raw.sheets || [])
+    sheets: normalizeSheets(raw.sheets || []),
+    sections: normalizeSections(raw.sections || [])
   };
 }
 // Migrates stored conjunts to the current hierarchy:
@@ -1433,7 +1461,7 @@ function grupRowCount(g){
 }
 function persistConjunts(){
   var all = loadAllCatalogs();
-  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, specPage: state.specPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables, refs: state.refs, sheets: state.sheets };
+  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, specPage: state.specPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables, refs: state.refs, sheets: state.sheets, sections: state.sections };
   localStorage.setItem(CATALOG_LS_KEY, JSON.stringify(all));
 }
 function uid(){
@@ -1971,7 +1999,7 @@ function getPageItemsFull(page){
       if(!it.str || !it.str.trim()) return;
       var tr = it.transform;
       var ang = ((Math.round(Math.atan2(tr[1], tr[0])*180/Math.PI) % 360) + 360) % 360;
-      items.push({px: tr[4], py: tr[5], pw: it.width||0, str: it.str, rot: ang});
+      items.push({px: tr[4], py: tr[5], pw: it.width||0, str: it.str, rot: ang, fs: Math.hypot(tr[2], tr[3]) || 0});
     });
     return items;
   });
@@ -3257,6 +3285,27 @@ function rotatedHeaderColumns(pageItems, marked, grid){
   gaps.sort(function(a,b){ return a-b; });
   var pitch = gaps.length ? gaps[Math.floor(gaps.length/2)] : 20;
   if(pitch < 6) return null;
+  // The headings give the columns' order and pitch; where exactly the band
+  // ends is a guess (a label row may sit between it and the first data row).
+  // So the registration comes from the body itself: the ink columns the grid
+  // did find are slid against the heading columns and the shift that lines
+  // most of them up is taken. Sparse columns the grid missed then fall into
+  // place with the rest.
+  var inkCols = grid.cols.filter(function(x){ return x > labels[0].colX - pitch; });
+  if(inkCols.length >= 2){
+    var bestD = 0, bestScore = Infinity;
+    var half = Math.floor(pitch/2);
+    for(var d=-half+1; d<=half; d++){
+      var score = 0;
+      inkCols.forEach(function(x){
+        var m = Infinity;
+        labels.forEach(function(lb){ var dd = Math.abs(x - (lb.colX + d)); if(dd < m) m = dd; });
+        score += Math.min(m, pitch/2);
+      });
+      if(score < bestScore){ bestScore = score; bestD = d; }
+    }
+    labels.forEach(function(lb){ lb.colX += bestD; });
+  }
   var firstEdge = labels[0].colX - pitch/2;
   var cols = grid.cols.filter(function(x){ return x < firstEdge - 4; }), headers = cols.map(function(){ return null; });
   labels.forEach(function(lb){ cols.push(lb.colX - pitch/2); headers.push(lb.text); });
@@ -3408,6 +3457,434 @@ els.mcDoneBtn.addEventListener('click', closeMachineCard);
 els.mcCloseBtn.addEventListener('click', closeMachineCard);
 els.machineCardOverlay.addEventListener('click', function(e){ if(e.target === els.machineCardOverlay) closeMachineCard(); });
 
+// ===== Reading the manual ==================================================
+// Everything above can be done by hand, a region at a time. But a PRODEC
+// manual is the same manual every time -- the same running header on every
+// body page, the same numbered headings, the same spares list under the same
+// four column labels, the same EPLAN title block on every schematic -- and
+// what is the same every time can be read without being shown where. This is
+// that reading: one pass over the pages to learn what each one is, then a
+// recipe per kind of page. The printed index can't be relied on (its page
+// numbers mostly aren't in the text layer), so the index is rebuilt from the
+// body: a section starts on the first page that carries its numbered heading.
+// Nothing here is final -- every result lands in the same panels as a hand
+// extraction and is edited the same way; and nothing already filled in by
+// hand is overwritten.
+function normalizeSections(list){
+  return (list||[]).map(function(x){
+    x = x || {};
+    var p = parseInt(x.page, 10);
+    return (x.num && !isNaN(p)) ? {num:String(x.num), title:x.title || '', page:p} : null;
+  }).filter(Boolean).sort(function(a,b){ return a.page - b.page || sectionKey(a.num) - sectionKey(b.num); });
+}
+function sectionKey(num){ // "5.10" sorts after "5.9"
+  return String(num).split('.').reduce(function(acc, part, i){ return acc + (parseInt(part,10)||0) / Math.pow(1000, i); }, 0);
+}
+function renderSectionsPanel(){
+  var n = state.sections.length;
+  els.sectionsPanel.style.display = n ? 'block' : 'none';
+  els.sectionsList.innerHTML = '';
+  if(!n) return;
+  els.sectionsSummary.textContent = n + ' seccions';
+  state.sections.forEach(function(x){
+    var tag = document.createElement('span'); tag.className = 'sheetTag';
+    tag.textContent = x.num + ' ' + x.title + ' → ' + x.page;
+    tag.title = 'Pàgina ' + x.page + ' (clica per veure-la)';
+    tag.addEventListener('click', function(){ openModal(x.page); });
+    els.sectionsList.appendChild(tag);
+  });
+}
+// -- what the running header, headings and footers of a body page look like --
+var RM_SKIP_LINE = /^page\s+\d+\s+of\s+\d+$|^(machine|serial|project|m[aà]quina|n[º°]?\s*de\s*serie|proyecto)\b.{0,14}:|MANUAL\s+DE\s+INSTRU|OPERATING AND MAINTEN|MANUAL DE (USO|OPERACI)/i;
+function rmPageNumberOf(lines){
+  for(var i=0;i<lines.length;i++){
+    var m = lines[i].text.match(/^(?:page|p[aá]g(?:ina)?\.?)\s+(\d+)\s+(?:of|de)\s+(\d+)$/i);
+    if(m) return parseInt(m[1],10);
+  }
+  return null;
+}
+// Items of one page grouped into baselines, each with its text and extents.
+function rmLines(items, rot){
+  var lines = [];
+  items.forEach(function(it){
+    if((it.rot||0) !== rot) return;
+    var line = null;
+    for(var j=0;j<lines.length;j++){ if(Math.abs(lines[j].py - it.py) < 3){ line = lines[j]; break; } }
+    if(!line){ line = {py: it.py, items: []}; lines.push(line); }
+    line.items.push(it);
+  });
+  lines.sort(function(a,b){ return b.py - a.py; });
+  lines.forEach(function(l){
+    l.items.sort(function(a,b){ return a.px - b.px; });
+    var t = '', prevEnd = null;
+    l.items.forEach(function(it){ if(prevEnd !== null && (it.px - prevEnd) > 1) t += ' '; t += it.str; prevEnd = it.px + (it.pw||0); });
+    l.text = t.replace(/\s+/g,' ').trim();
+    l.x0 = l.items[0].px; l.x1 = prevEnd;
+    l.fs = l.items.reduce(function(m, it){ return Math.max(m, it.fs||0); }, 0);
+  });
+  return lines;
+}
+function rmMedianFs(lines){
+  var v = [];
+  lines.forEach(function(l){ l.items.forEach(function(it){ if(it.fs) v.push(it.fs); }); });
+  v.sort(function(a,b){ return a-b; });
+  return v.length ? v[Math.floor(v.length/2)] : 0;
+}
+// A numbered heading in capitals: "5.9 RECOMMENDED SPARE PARTS LIST", also
+// when the number and the title come as two baselines a few points apart.
+// A heading is a number and a title in capitals, set LARGER than the page's
+// text -- which is what tells "5.9 RECOMMENDED SPARE PARTS LIST" from a table
+// row that happens to begin with a figure ("3 / 380V", a quantity of 0 above
+// a description). The number and the title may come on two baselines.
+function rmTitleLike(t){
+  t = (t||'').replace(/\s*\.+\s*$/,'').trim();
+  if(!/^[A-ZÀ-Ü]/.test(t) || !mostlyUpper(t)) return null;
+  var letters = t.replace(/[^A-Za-zÀ-ÿ]/g,'').length;
+  return letters >= 5 ? t : null;
+}
+function rmHeadingsOf(lines, pageFs){
+  var out = [], big = Math.max((pageFs||0) * 1.12, 10.5);
+  for(var i=0;i<lines.length;i++){
+    var t = lines[i].text;
+    if(RM_SKIP_LINE.test(t) || lines[i].fs < big) continue;
+    var m = t.match(/^(\d+(?:\.\d+)*)\s*\.?\s+(\S.{2,90})$/), title;
+    if(m && (title = rmTitleLike(m[2]))){ out.push({num:m[1], title:title, py:lines[i].py}); continue; }
+    var mn = t.match(/^(\d+(?:\.\d+)*)\.?$/);
+    if(mn && i+1 < lines.length && Math.abs(lines[i].py - lines[i+1].py) < 14 && lines[i+1].fs >= big && !RM_SKIP_LINE.test(lines[i+1].text) && (title = rmTitleLike(lines[i+1].text))){
+      out.push({num:mn[1], title:title, py:lines[i].py}); i++;
+    }
+  }
+  return out;
+}
+// -- the machine's data sheet: a label, and its value to the right on the same
+//    baseline (or spilling onto the baselines just above and below) --
+var RM_MACHINE_LABELS = [
+  [/^(MANUFACTURER|FABRICANTE)$/i, 'manufacturer'],
+  [/^(TYPE OF MACHINE|MACHINE TYPE|TIPO DE M[AÁ]QUINA|MODELO?)$/i, 'model'],
+  [/^(PROJECT|PROYECTO)( ?\/ ?(PURCHASING ORDER|OT|PEDIDO))?$/i, 'project'],
+  [/^(SERIAL NUMBER|SERIAL N[º°O]?\.?|N[º°O]?\.? ?DE SERIE|MACHINE NUMBER)$/i, 'serial'],
+  [/^(MANUFACTURING YEAR|YEAR OF MANUFACTURE|YEAR CONSTRUCTION|A[ÑN]O DE FABRICACI[OÓ]N)( ?\/ ?CE MARKING)?$/i, 'year'],
+  [/^(DESIGNED FOR|DISE[ÑN]AD[AO] PARA|USO PREVISTO)$/i, 'purpose'],
+  [/^(CLIENT USER|CLIENT|CLIENTE|USUARIO|CUSTOMER)$/i, 'client'],
+  [/^(FINAL LOCATION|PLACE OF INSTALLATION|UBICACI[OÓ]N( FINAL)?|INSTALATION SITE)$/i, 'site'],
+  [/^(VOLTAGE( AMONG PHASES| BETWEEN PHASES)?|TENSI[OÓ]N( ENTRE FASES)?|POWER INFEED)$/i, 'voltage'],
+  [/^(FREQUENCY|FRECUENCIA)$/i, 'freq'],
+  [/^(INSTALLED POWER|TOTAL POWER|POTENCIA (INSTALADA|TOTAL))$/i, 'power'],
+  [/^(AIR PRESSURE|WORKING PRESSURE( \(bar\))?|PRESI[OÓ]N (DE )?(AIRE|TRABAJO))$/i, 'airBar'],
+  [/^(AIR CONSUMPTION|CONSUMO (DE )?AIRE)$/i, 'airLpm']
+];
+// Splits a baseline into segments at gaps wider than a word space: on the
+// data sheet that's label | value, on the power table label | value | label | value.
+function rmSegments(line, gap){
+  gap = gap || 14;
+  var segs = [], cur = null, prevEnd = null;
+  line.items.forEach(function(it){
+    if(cur && prevEnd !== null && (it.px - prevEnd) > gap){ segs.push(cur); cur = null; }
+    if(!cur) cur = {items:[], x0:it.px};
+    cur.items.push(it);
+    prevEnd = it.px + (it.pw||0);
+    cur.x1 = prevEnd;
+  });
+  if(cur) segs.push(cur);
+  segs.forEach(function(sg){
+    var t = '', prevEnd = null;
+    sg.items.forEach(function(it){ if(prevEnd !== null && (it.px - prevEnd) > 1) t += ' '; t += it.str; prevEnd = it.px + (it.pw||0); });
+    sg.text = t.replace(/\s+/g,' ').trim();
+  });
+  return segs;
+}
+function rmMachineFromLines(lines, found){
+  lines.forEach(function(line){
+    var segs = rmSegments(line);
+    segs.forEach(function(sg, i){
+      var field = null;
+      for(var k=0;k<RM_MACHINE_LABELS.length;k++){ if(RM_MACHINE_LABELS[k][0].test(sg.text)){ field = RM_MACHINE_LABELS[k][1]; break; } }
+      if(!field || found[field]) return;
+      var value = '';
+      if(i+1 < segs.length && !RM_MACHINE_LABELS.some(function(L){ return L[0].test(segs[i+1].text); })){
+        value = segs[i+1].text;
+      } else {
+        // the value sits on neighbouring baselines (a two-line address)
+        var limitX = (i+1 < segs.length) ? segs[i+1].x0 - 2 : Infinity;
+        var near = lines.filter(function(l){ return l !== line && Math.abs(l.py - line.py) <= 8; });
+        var parts = [];
+        near.sort(function(a,b){ return b.py - a.py; }).forEach(function(l){
+          var its = l.items.filter(function(it){ return it.px > sg.x1 + 10 && it.px < limitX; }), txt = '', pe = null;
+          its.forEach(function(it){ if(pe !== null && (it.px - pe) > 1) txt += ' '; txt += it.str; pe = it.px + (it.pw||0); });
+          if(txt.trim()) parts.push(txt.trim());
+        });
+        value = parts.join(' ').replace(/\s+/g,' ').trim();
+      }
+      if(value) found[field] = value;
+    });
+  });
+}
+// -- the recommended spares list: four printed column labels, then rows --
+var RM_SPARES_HEADER = [
+  [/^(Component|Componente|Ref|C[oó]digo|Code)/i, 'ref'],
+  [/SPARE PARTS|Denominaci|Descripci|Description/i, 'denominacio'],
+  [/^(Cant|Qty|Ctd|Uds)/i, 'cant'],
+  [/^(Mat|Manufacturer|Fabricante|Cat)/i, 'cat']
+];
+function rmSparesHeader(lines){
+  for(var i=0;i<lines.length;i++){
+    var segs = rmSegments(lines[i], 8), roles = [], hit = 0;
+    segs.forEach(function(sg){
+      var r = '';
+      for(var k=0;k<RM_SPARES_HEADER.length;k++){ if(RM_SPARES_HEADER[k][0].test(sg.text)){ r = RM_SPARES_HEADER[k][1]; break; } }
+      if(r) hit++;
+      roles.push({x:sg.x0, role:r});
+    });
+    if(hit >= 3) return {py: lines[i].py, cols: roles};
+  }
+  return null;
+}
+// Body lines of a page: below a given baseline (or the running header),
+// above the footer, and none of the header/heading furniture.
+function rmBodyItems(lines, belowPy){
+  var out = [];
+  // the running header's lowest baseline bounds the body from above (its
+  // other lines -- the product name, say -- carry nothing that marks them)
+  var hdrBottom = null;
+  lines.forEach(function(l){ if(RM_SKIP_LINE.test(l.text) && l.py > 300 && (hdrBottom === null || l.py < hdrBottom)) hdrBottom = l.py; });
+  lines.forEach(function(l){
+    if(belowPy != null && l.py >= belowPy - 2) return;
+    if(hdrBottom !== null && l.py >= hdrBottom - 2) return;
+    if(l.py < 40) return;
+    if(RM_SKIP_LINE.test(l.text)) return;
+    if(/^(\d+(?:\.\d+)*)\s*\.?\s+\S/.test(l.text) && mostlyUpper(l.text.replace(/^[\d.\s]+/,''))) return; // chapter heading repeated on the page
+    if(/^\d+(?:\.\d+)*\.?$/.test(l.text)) return;
+    l.items.forEach(function(it){ out.push(it); });
+  });
+  return out;
+}
+function rmRolesForGrid(grid, hdr){
+  // each printed label names the grid column nearest to it
+  var roles = grid.cols.map(function(){ return ''; });
+  hdr.cols.forEach(function(h){
+    if(!h.role) return;
+    var best = -1, bd = Infinity;
+    grid.cols.forEach(function(x, i){ var d = Math.abs(x - h.x); if(d < bd){ bd = d; best = i; } });
+    if(best >= 0 && !roles[best]) roles[best] = h.role;
+  });
+  return roles;
+}
+// -- the electrical material list: EPLAN's own column labels, in its own axes --
+var RM_BOM_HEADER = [
+  [/^Device tag|^Designaci[oó]n del dispositivo|^Betriebsmittel/i, 'tag'],
+  [/^Quantity|^Cantidad|^Menge/i, 'cant'],
+  [/^Designation|^Descripci|^Benennung/i, 'denominacio'],
+  [/^Type number|^Tipo|^Typnummer/i, 'tipus'],
+  [/^Manufacturer|^Fabricante|^Hersteller/i, 'fab'],
+  [/^Part number|^N[º°]? ?de art|^Referencia|^Artikelnummer/i, 'ref'],
+  [/^Page$|^P[aá]gina$|^Seite$/i, 'full']
+];
+function rmBomRoles(pageItems){
+  var labels = [];
+  pageItems.forEach(function(it){
+    for(var k=0;k<RM_BOM_HEADER.length;k++){
+      if(RM_BOM_HEADER[k][0].test((it.str||'').trim())){ labels.push({it:it, role:RM_BOM_HEADER[k][1]}); return; }
+    }
+  });
+  if(labels.length < 5) return null;
+  return labels;
+}
+// -- the pass itself --
+function rmCollectPage(page){
+  return getPageItemsFull(page).then(function(items){
+    var lines = rmLines(items, 0);
+    var info = {page:page, items:items, lines:lines, manualPage: rmPageNumberOf(lines), headings: rmHeadingsOf(lines, rmMedianFs(lines))};
+    info.body = info.manualPage != null;
+    return info;
+  });
+}
+function readManual(){
+  if(!state.pdfDoc) return;
+  var btn = els.readManualBtn, lbl = btn.textContent; btn.disabled = true;
+  var N = state.numPages, infos = [];
+  var report = {sections:0, machine:0, spares:0, electrical:0, matrix:0, refs:0, sheets:0};
+  var chain = Promise.resolve();
+  for(var p=1;p<=N;p++) (function(p){
+    chain = chain.then(function(){
+      btn.textContent = 'Llegint ' + p + ' / ' + N + '…';
+      return rmCollectPage(p).then(function(info){ infos.push(info); });
+    });
+  })(p);
+  return chain.then(function(){
+    // 1. the index: a section starts on the first page carrying its heading
+    var seen = {}, sections = [];
+    infos.forEach(function(info){
+      if(!info.body) return;
+      // The printed contents and a chapter's own sub-index carry many
+      // headings on one page; no section starts there.
+      if(info.headings.length >= 4) return;
+      if(info.headings.some(function(h){ return /CONTENTS|ÍNDICE|INDICE/i.test(h.title); })) return;
+      info.headings.forEach(function(h){
+        if(seen[h.num]) return;
+        seen[h.num] = 1;
+        sections.push({num:h.num, title:h.title, page:info.page});
+      });
+    });
+    if(sections.length){ state.sections = normalizeSections(sections); report.sections = state.sections.length; }
+    function sectionRange(re){
+      var secs = state.sections.slice().sort(function(a,b){ return a.page - b.page; });
+      for(var i=0;i<secs.length;i++){
+        if(!re.test(secs[i].title)) continue;
+        var from = secs[i].page, to = from;
+        for(var j=i+1;j<secs.length;j++){ if(secs[j].page > from){ to = secs[j].page - 1; break; } }
+        if(to < from) to = from;
+        return {from:from, to:to, title:secs[i].title};
+      }
+      return null;
+    }
+    function infoOf(page){ return infos[page-1]; }
+    // 2. the machine card, from any body page that carries its labels
+    var found = {};
+    var dataSecs = state.sections.filter(function(x){ return /MANUFACTURER|MACHINE DATA|TECHNICAL (SPEC|FEATURE)|DATOS (DEL FABRICANTE|DE LA M)|CARACTER[IÍ]STICAS T/i.test(x.title); });
+    var dataPages = {};
+    dataSecs.forEach(function(sec){
+      var r = sectionRange(new RegExp(sec.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+      if(r) for(var q=r.from;q<=r.to;q++) dataPages[q] = 1;
+    });
+    infos.forEach(function(info){
+      if(!info.body) return;
+      if(dataSecs.length && !dataPages[info.page]) return;
+      rmMachineFromLines(info.lines, found);
+    });
+    MACHINE_FIELDS.forEach(function(f){
+      if(found[f.k] && !(state.machine[f.k]||'').trim()){ state.machine[f.k] = found[f.k]; report.machine++; }
+    });
+    // 3. recommended spares: header-anchored on its first page, continued below
+    var sp = sectionRange(/RECOMMENDED SPARE|RECAMBIOS RECOMENDADOS|SPARE PARTS LIST/i);
+    if(sp && !state.tables.some(function(t){ return t.kind === 'spares' && t.auto; })){
+      var t = {id:uid(), kind:'spares', name:sp.title, pages:[], fields:[], labels:{}, colRoles:null, rows:[], auto:true};
+      var roles = null, cols0 = null;
+      for(var p2=sp.from;p2<=sp.to;p2++){
+        var info = infoOf(p2), hdr = rmSparesHeader(info.lines);
+        var body = rmBodyItems(info.lines, hdr ? hdr.py : null);
+        if(!body.length) continue;
+        var grid;
+        if(hdr){
+          grid = itemsToGrid(body);
+          roles = rmRolesForGrid(grid, hdr);
+          cols0 = grid.cols.slice();
+        } else {
+          if(!cols0) continue;           // no header seen yet: not the list
+          grid = {cols: cols0, rows: rowsFromItems(body, cols0)};
+        }
+        var added = 0;
+        grid.rows.forEach(function(cells){
+          var row = rowFromFieldCells(cells, roles, p2);
+          if(row && (row.ref || row.denominacio) && Object.keys(row).length >= 3){ t.rows.push(row); added++; }
+        });
+        if(added){ t.pages.push(p2); t.colRoles = roles.slice(); }
+      }
+      if(t.rows.length){ state.tables.push(t); report.spares = t.rows.length; }
+    }
+    // 4. the commercial component maintenance matrix
+    var mx = sectionRange(/COMPONENT MAINTENANCE|COMPONENTES COMERCIALES/i);
+    if(mx && !state.tables.some(function(t){ return t.kind === 'free' && t.auto; })){
+      var info3 = infoOf(mx.from);
+      var compLine = info3.lines.filter(function(l){ return /^COMPONENT(S|ES)?$/i.test(l.text); })[0];
+      if(compLine){
+        var body3 = rmBodyItems(info3.lines, compLine.py).filter(function(it){ return it.px > 40; });
+        var grid3 = itemsToGrid(body3);
+        var hdr3 = grid3.cols.length ? rotatedHeaderColumns(info3.items, body3, grid3) : null;
+        if(hdr3 && hdr3.headers.length > 3){
+          var names = hdr3.headers.map(function(h){ return h || 'Component'; });
+          var slugs = names.map(slugField), labels = {};
+          names.forEach(function(n, i){ if(slugs[i]) labels[slugs[i]] = n; });
+          var t3 = {id:uid(), kind:'free', name:mx.title, pages:[mx.from], fields:slugs.filter(Boolean), labels:labels, colRoles:slugs.slice(), rows:[], auto:true};
+          hdr3.rows.forEach(function(cells){
+            var row = rowFromFieldCells(cells, slugs, mx.from);
+            if(row && Object.keys(row).length >= 3) t3.rows.push(row);
+          });
+          if(t3.rows.length){ state.tables.push(t3); report.matrix = t3.rows.length; }
+        }
+      }
+    }
+    // 5. pages worth pointing at
+    [[/CONSIGNMENT POINTS|PUNTOS DE CONSIGNACI/i, 'location'],
+     [/PANELS AND CONTROL COMPONENTS|PANELES/i, 'location'],
+     [/SAFETY DEVICES INCLUDED|DISPOSITIVOS DE SEGURIDAD/i, 'location'],
+     [/LUBRICATION PROCEDURE|LUBRICACI/i, 'procedure'],
+     [/UNPACKING AND INSTALLATION|INSTALACI/i, 'procedure']].forEach(function(pair){
+      var sec = state.sections.filter(function(x){ return pair[0].test(x.title); })[0];
+      if(!sec || refOnPage(sec.page)) return;
+      state.refs.push({id:uid(), kind:pair[1], page:sec.page, label:sec.num + ' ' + sec.title});
+      report.refs++;
+    });
+    state.refs.sort(byRefPage);
+    // 6. the schematic annex: sheet numbers, and the material lists
+    var annex = infos.filter(function(info){ return !info.body; });
+    var bomRows = 0, tE = null, sheetPages = [];
+    var chain2 = Promise.resolve();
+    annex.forEach(function(info){
+      chain2 = chain2.then(function(){
+        return readSheetNumber(info.page).then(function(sheet){
+          if(sheet){
+            sheetPages.push(info.page);
+            if(!state.sheets.some(function(x){ return x.page === info.page; }) && !state.sheets.some(function(x){ return x.sheet === sheet; })){
+              state.sheets.push({sheet:sheet, page:info.page}); report.sheets++;
+            }
+          }
+          var labels = rmBomRoles(info.items);
+          if(!labels) return;
+          if(state.tables.some(function(t){ return t.kind === 'electrical' && t.auto && t.pages.indexOf(info.page) >= 0; })) return;
+          // the list's own axes: rows across the labels' line, one per component
+          var hdrV = labels.reduce(function(a, L){ return a + uvOf(L.it).v; }, 0) / labels.length;
+          var bodyItems = info.items.filter(function(it){ return it.rot === labels[0].it.rot && uvOf(it).v > hdrV + 3; });
+          if(!bodyItems.length) return;
+          var gridE = itemsToGrid(bodyItems);
+          // name the columns by the label whose along-position they share
+          var rolesE = gridE.cols.map(function(x){
+            var best = '', bd = Infinity;
+            labels.forEach(function(L){ var d = Math.abs(uvOf(L.it).u - x); if(d < bd){ bd = d; best = L.role; } });
+            return bd < 60 ? best : '';
+          });
+          var rowsE = [];
+          gridE.rows.forEach(function(cells){
+            var row = rowFromFieldCells(cells, rolesE, info.page);
+            if(row && row.tag && (row.ref || row.denominacio) && !/^(Device tag|Page|Part number)$/i.test(row.ref||'')) rowsE.push(row);
+          });
+          if(!rowsE.length) return;
+          if(!tE){
+            tE = {id:uid(), kind:'electrical', name:'Llista de materials elèctrica', pages:[], fields:[], labels:{}, colRoles:rolesE.slice(), rows:[], auto:true};
+            state.tables.push(tE);
+          }
+          tE.pages.push(info.page);
+          rowsE.forEach(function(r){ tE.rows.push(r); });
+          bomRows += rowsE.length;
+        });
+      });
+    });
+    return chain2.then(function(){
+      state.sheets.sort(function(a,b){ return a.page - b.page; });
+      report.electrical = bomRows;
+      persistConjunts();
+      renderMachinePanel(); renderSectionsPanel(); renderTablesPanel(); renderRefsPanel(); renderSheetsPanel();
+      btn.disabled = false; btn.textContent = lbl;
+      var parts = [];
+      parts.push(report.sections + ' seccions');
+      parts.push(report.machine + ' camps de màquina');
+      if(report.spares) parts.push(report.spares + ' recanvis');
+      if(report.electrical) parts.push(report.electrical + ' materials elèctrics');
+      if(report.matrix) parts.push('matriu de ' + report.matrix + ' components');
+      if(report.refs) parts.push(report.refs + ' pàgines marcades');
+      if(report.sheets) parts.push(report.sheets + ' fulls');
+      var msg = 'Manual llegit: ' + parts.join(' · ') + '. Tot es pot revisar i corregir als panells.';
+      setStatus(msg);
+      showToast(msg, 8000);
+      return report;
+    });
+  }).catch(function(err){
+    console.error(err);
+    btn.disabled = false; btn.textContent = lbl;
+    showToast('No s\'ha pogut llegir el manual: ' + err.message, 5000);
+  });
+}
+els.readManualBtn.addEventListener('click', readManual);
+
 // ===== Sheet map ===========================================================
 // The electrical material list says on which SHEET each device is drawn --
 // "90", "211", "741A" -- and a sheet number is not a page number: the schematic
@@ -3432,6 +3909,14 @@ function readSheetNumber(page){
     items.forEach(function(l){
       if(!/^(Page|P[aá]g\.?|Pàgina|Hoja|Full|Blatt)$/i.test((l.str||'').trim())) return;
       var lu = uvOf(l);
+      // "Page 1 of 10" is a count of sheets, not a sheet's own number: a
+      // title block that says "of" / "de" right after the label isn't EPLAN's
+      var ofWord = items.some(function(i){
+        if(i === l || (i.rot||0) !== (l.rot||0)) return false;
+        if(!/^(of|de)$/i.test((i.str||'').trim())) return false;
+        var u = uvOf(i); return Math.abs(u.v - lu.v) < 16 && u.u > lu.u - 5 && u.u - lu.u < 130;
+      });
+      if(ofWord) return;
       items.forEach(function(i){
         if(i === l || (i.rot||0) !== (l.rot||0)) return;
         var t = sheetTokenOf(i.str); if(!t) return;
@@ -3818,6 +4303,9 @@ function catalogPayload(){
   if(!pages && state.sheets.length){
     out.sheets = state.sheets.map(function(x){ return {sheet:x.sheet, page:x.page}; });
   }
+  if(!pages && state.sections.length){
+    out.sections = state.sections.map(function(x){ return {num:x.num, title:x.title, page:x.page}; });
+  }
   return out;
 }
 // Named after whatever PDF it pairs with: the source manual (…/Foo.pdf →
@@ -4090,6 +4578,9 @@ function importCatalogJson(data){
     });
     state.refs.sort(byRefPage);
   }
+  if(data && Array.isArray(data.sections) && data.sections.length && !state.sections.length){
+    state.sections = normalizeSections(data.sections);
+  }
   var nS = 0;
   if(data && Array.isArray(data.sheets) && data.sheets.length){
     var havePage = {}; state.sheets.forEach(function(x){ havePage[x.page] = 1; });
@@ -4102,6 +4593,7 @@ function importCatalogJson(data){
   renderTablesPanel();
   renderRefsPanel();
   renderSheetsPanel();
+  renderSectionsPanel();
   var parts = [];
   if(list.length) parts.push(list.length + (list.length===1 ? ' conjunt' : ' conjunts'));
   if(nT) parts.push(nT + (nT===1 ? ' taula' : ' taules'));
