@@ -372,6 +372,7 @@
     <button id="sheetsClearBtn" style="margin-left:auto;">Buida el mapa</button>
   </div>
   <div id="sheetsList"></div>
+  <div id="schFields"></div>
 </div>
 
 <div id="status"></div>
@@ -742,6 +743,7 @@ var els = {
   sheetsPanel: document.getElementById('sheetsPanel'),
   sheetsSummary: document.getElementById('sheetsSummary'),
   sheetsList: document.getElementById('sheetsList'),
+  schFields: document.getElementById('schFields'),
   sheetsClearBtn: document.getElementById('sheetsClearBtn'),
   readManualBtn: document.getElementById('readManualBtn'),
   sectionsPanel: document.getElementById('sectionsPanel'),
@@ -776,8 +778,42 @@ var state = {
   refs: [],            // marked pages: what is only an image, pointed at
   editingRef: null,    // id of the marked page open in its editor
   sheets: [],          // schematic sheet number -> page, read off the title blocks
+  schematic: null,     // who the schematic IS: name, revision, date (see SCHEMATIC_FIELDS)
   sections: []         // the manual's own index: numbered heading -> first page
 };
+// -- Who the schematic is. The devices of the electrical list are ordered off
+//    the EPLAN schematic, not off the manual, and the schematic carries its own
+//    name and its own revision: a contactor ordered from a schematic one
+//    revision behind the cabinet is the wrong contactor. The field app prints
+//    this at the foot of the parts section, so it has to travel with the rest.
+//
+//    Picked by hand with the same 🎯 as the machine's data sheet, off a
+//    schematic page. Not read automatically like the sheet numbers: the sheet
+//    number is always in the same slot of the title block, while what the name
+//    and the revision are CALLED there changes with the language and with who
+//    drew it, and guessing wrong here puts a wrong revision on a report. --
+var SCHEMATIC_FIELDS = [
+  {k:'name', label:'Nom de l\'esquema'},
+  {k:'rev',  label:'Versió / revisió'},
+  {k:'date', label:'Data del caixetí'}
+];
+function emptySchematic(){
+  var o = {};
+  SCHEMATIC_FIELDS.forEach(function(f){ o[f.k] = ''; });
+  return o;
+}
+function schematicOf(){
+  if(!state.schematic) state.schematic = emptySchematic();
+  return state.schematic;
+}
+function schematicFilled(){
+  var o = state.schematic || {};
+  return SCHEMATIC_FIELDS.some(function(f){ return (o[f.k]||'').toString().trim(); });
+}
+// A schematic page to point the 🎯 at: the first one the sheet map found.
+function schPickSource(){
+  return (state.sheets[0] && state.sheets[0].page) || null;
+}
 
 function showToast(msg, ms){
   els.toast.textContent = msg;
@@ -812,7 +848,8 @@ function resetApp(){
   state.selected = new Set(); state.cells = [];
   state.conjunts = []; state.editingGrup = null; state.currentConjuntId = null;
   state.pendingMenuImport = null;
-  state.machine = emptyMachine(); state.portadaPage = null; state.specPage = null; state.colLayout = null;
+  state.machine = emptyMachine(); state.schematic = emptySchematic();
+  state.portadaPage = null; state.specPage = null; state.colLayout = null;
   state.tables = []; state.editingTable = null;
   state.refs = []; state.editingRef = null;
   state.sheets = []; state.sections = [];
@@ -1472,7 +1509,8 @@ function emptyCatalog(){
   return { machine:emptyMachine(), portadaPage:null, specPage:null, colLayout:null, conjunts:[], tables:[], refs:[], sheets:[], sections:[] };
 }
 function applyCatalog(cat){
-  state.machine = cat.machine; state.portadaPage = cat.portadaPage; state.specPage = cat.specPage;
+  state.machine = cat.machine; state.schematic = cat.schematic || emptySchematic();
+  state.portadaPage = cat.portadaPage; state.specPage = cat.specPage;
   state.colLayout = cat.colLayout; state.conjunts = cat.conjunts; state.tables = cat.tables;
   state.refs = cat.refs; state.sheets = cat.sheets; state.sections = cat.sections;
 }
@@ -1504,7 +1542,7 @@ els.recoverBtn.addEventListener('click', function(){
 });
 function persistConjunts(){
   var all = loadAllCatalogs();
-  all[state.fileName] = { machine: state.machine, portadaPage: state.portadaPage, specPage: state.specPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables, refs: state.refs, sheets: state.sheets, sections: state.sections };
+  all[state.fileName] = { machine: state.machine, schematic: state.schematic, portadaPage: state.portadaPage, specPage: state.specPage, colLayout: state.colLayout, conjunts: state.conjunts, tables: state.tables, refs: state.refs, sheets: state.sheets, sections: state.sections };
   localStorage.setItem(CATALOG_LS_KEY, JSON.stringify(all));
 }
 function uid(){
@@ -4062,6 +4100,41 @@ function renderSheetsPanel(){
     tag.addEventListener('click', function(){ openModal(x.page); });
     els.sheetsList.appendChild(tag);
   });
+  renderSchematicFields();
+}
+// The three fields under the sheet map: the same shape as the machine card's
+// rows, because it is the same job — point at a value on a page and keep it.
+function renderSchematicFields(){
+  var box = els.schFields; if(!box) return;
+  box.innerHTML = '';
+  var src = schPickSource();
+  var head = document.createElement('div'); head.className = 'dtLabel';
+  head.style.cssText = 'margin:8px 0 4px';
+  head.textContent = src
+    ? 'Qui és l\'esquema (el 🎯 ho va a buscar al caixetí de la pàgina ' + src + ')'
+    : 'Qui és l\'esquema';
+  box.appendChild(head);
+  var o = schematicOf();
+  SCHEMATIC_FIELDS.forEach(function(f){
+    var row = document.createElement('div'); row.className = 'mcRow';
+    var lab = document.createElement('label'); lab.textContent = f.label; lab.htmlFor = 'sch_' + f.k;
+    var inp = document.createElement('input'); inp.type = 'text'; inp.id = 'sch_' + f.k;
+    inp.value = o[f.k] || '';
+    inp.addEventListener('input', function(){ schematicOf()[f.k] = inp.value; });
+    inp.addEventListener('change', persistConjunts);
+    var pick = document.createElement('button'); pick.textContent = '🎯';
+    pick.title = src ? ('Tria el valor arrossegant sobre la pàgina ' + src) : 'Cal el mapa de fulls per saber quina pàgina obrir';
+    pick.disabled = !src;
+    pick.addEventListener('click', function(){
+      startPicking(schPickSource(), function(text){
+        text = (text||'').trim(); if(!text) return;
+        schematicOf()[f.k] = text; inp.value = text;
+        persistConjunts();
+      });
+    });
+    row.appendChild(lab); row.appendChild(inp); row.appendChild(pick);
+    box.appendChild(row);
+  });
 }
 function scanSheets(pages){
   var btn = els.scanSheetsBtn, lbl = btn.textContent;
@@ -4423,6 +4496,9 @@ function catalogPayload(){
   });
   if(state.refs.length) out.refs = state.refs.map(function(r){ return {kind:r.kind, page:pg(r.page), label:refTitle(r)}; });
   if(state.sheets.length) out.sheets = state.sheets.map(function(x){ return {sheet:x.sheet, page:pg(x.page)}; });
+  // Only when there is something to say: an absent block means "not known",
+  // and the field app then falls back to the electrical table's own name.
+  if(schematicFilled()) out.schematic = JSON.parse(JSON.stringify(state.schematic));
   if(state.sections.length) out.sections = state.sections.map(function(x){ return {num:x.num, title:x.title, page:pg(x.page)}; });
   return out;
 }
